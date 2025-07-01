@@ -1,83 +1,123 @@
-name: Checkout
+name: "Smart Checkout"
+description: "Checkout with fallback to alternate repository/ref if primary ref does not exist"
+author: "Your Name"
 
 inputs:
     fetch-depth:
-        default: 1
+        description: "Number of commits to fetch"
+        default: "1"
         required: false
-        type: number
     path:
+        description: "Relative path under $GITHUB_WORKSPACE to place the repository"
         required: false
-        type: string
     repository:
+        description: "Repository name with owner"
         default: ${{ github.repository }}
         required: false
-        type: string
     ref:
+        description: "The branch, tag or SHA to checkout"
         required: false
-        type: string
     alternate_repository:
+        description: "Fallback repository name with owner"
         required: false
-        type: string
     alternate_ref:
+        description: "Fallback branch, tag or SHA to checkout"
         required: false
-        type: string
     token:
+        description: "Personal access token (PAT) used to fetch the repository"
         default: ${{ github.token }}
         required: false
-        type: string
 
 outputs:
     ref_exists:
-        description: 'Specifies whether the ref exists or not'
+        description: "Whether the primary ref exists (true/false/default)"
         value: ${{ steps.repo.outputs.ref-exists }}
+    repository_used:
+        description: "The repository that was actually checked out"
+        value: ${{ steps.set-output.outputs.repository }}
+    ref_used:
+        description: "The ref that was actually checked out"
+        value: ${{ steps.set-output.outputs.ref }}
 
 runs:
     using: composite
-
     steps:
-        - id: repo
+        - name: Validate inputs
+          id: validate
+          shell: bash
+          run: |
+              if [[ -n "${{ inputs.ref }}" && -n "${{ inputs.alternate_ref }}" && -z "${{ inputs.alternate_repository }}" ]]; then
+                echo "::error::alternate_repository is required when alternate_ref is specified"
+                exit 1
+              fi
+
+        - name: Check if ref exists
+          id: repo
           shell: bash
           env:
               GH_TOKEN: ${{ inputs.token }}
-              ALTERNATE_REF: ${{ inputs.alternate_ref }}
               REPOSITORY: ${{ inputs.repository }}
               REF: ${{ inputs.ref }}
           run: |
-              if git ls-remote --heads --quiet --exit-code https://$GH_TOKEN@github.com/$REPOSITORY.git $REF
-              then
-                echo "::notice::Checkout: $REPOSITORY using $REF"
-                echo "ref-exists=true" >> $GITHUB_OUTPUT
-              else
-                echo "::notice::Checkout: $REPOSITORY does not have ref  $REF (fallback to $ALTERNATE_REF)"
-                echo "ref-exists=false" >> $GITHUB_OUTPUT
+              set -e
+
+              if [[ -z "$REF" ]]; then
+                echo "::notice::No ref specified, using default branch"
+                echo "ref-exists=default" >> $GITHUB_OUTPUT
+                exit 0
               fi
 
-        - if: steps.repo.outputs.ref-exists == 'true'
-          uses: actions/checkout@a12a3943b4bdde767164f792f33f40b04645d846
-          env:
-              REPO_PATH: ${{ inputs.path }}
-              GH_TOKEN: ${{ inputs.token }}
-              REPOSITORY: ${{ inputs.repository }}
-              FETCH_DEPTH: ${{ inputs.fetch-depth }}
-              REF: ${{ inputs.ref }}
-          with:
-              fetch-depth: ${{ env.FETCH_DEPTH }}
-              path: ${{ env.REPO_PATH }}
-              repository: ${{ env.REPOSITORY }}
-              ref: ${{ env.REF }}
-              token: ${{ env.GH_TOKEN }}
+              # Check both heads and tags with authentication
+              if git ls-remote --exit-code https://$GH_TOKEN@github.com/$REPOSITORY.git "$REF" >/dev/null 2>&1; then
+                echo "::notice::Found ref '$REF' in $REPOSITORY"
+                echo "ref-exists=true" >> $GITHUB_OUTPUT
+              else
+                echo "::warning::Ref '$REF' not found in $REPOSITORY"
+                if [[ -n "${{ inputs.alternate_repository }}" ]]; then
+                  echo "::notice::Will fallback to ${{ inputs.alternate_repository }}"
+                  echo "ref-exists=false" >> $GITHUB_OUTPUT
+                else
+                  echo "::error::No alternate repository specified for fallback"
+                  exit 1
+                fi
+              fi
 
-        - if: steps.repo.outputs.ref-exists == 'false'
-          uses: actions/checkout@a12a3943b4bdde767164f792f33f40b04645d846
-          env:
-              REPO_PATH: ${{ inputs.path }}
-              GH_TOKEN: ${{ inputs.token }}
-              ALTERNATE_REF: ${{ inputs.alternate_ref }}
-              ALTERNATE_REPOSITORY: ${{ inputs.alternate_repository }}
-              FETCH_DEPTH: ${{ inputs.fetch-depth }}
+        - name: Checkout primary repository
+          if: steps.repo.outputs.ref-exists == 'true' || steps.repo.outputs.ref-exists == 'default'
+          uses: actions/checkout@v4
           with:
-              fetch-depth: ${{ env.FETCH_DEPTH }}
-              path: ${{ env.REPO_PATH }}
-              repository: ${{ env.ALTERNATE_REPOSITORY }}
-              ref: ${{ env.ALTERNATE_REF }}
-              token: ${{ env.GH_TOKEN }}
+              fetch-depth: ${{ inputs.fetch-depth }}
+              path: ${{ inputs.path }}
+              repository: ${{ inputs.repository }}
+              ref: ${{ inputs.ref }}
+              token: ${{ inputs.token }}
+
+        - name: Checkout alternate repository
+          if: steps.repo.outputs.ref-exists == 'false'
+          uses: actions/checkout@v4
+          with:
+              fetch-depth: ${{ inputs.fetch-depth }}
+              path: ${{ inputs.path }}
+              repository: ${{ inputs.alternate_repository }}
+              ref: ${{ inputs.alternate_ref || inputs.ref }}
+              token: ${{ inputs.token }}
+
+        - name: Set final outputs
+          id: set-output
+          shell: bash
+          env:
+              REF_EXISTS: ${{ steps.repo.outputs.ref-exists }}
+              PRIMARY_REPO: ${{ inputs.repository }}
+              PRIMARY_REF: ${{ inputs.ref }}
+              ALTERNATE_REPO: ${{ inputs.alternate_repository }}
+              ALTERNATE_REF: ${{ inputs.alternate_ref }}
+          run: |
+              if [[ "$REF_EXISTS" == "false" ]]; then
+                echo "repository=${ALTERNATE_REPO}" >> $GITHUB_OUTPUT
+                echo "ref=${ALTERNATE_REF:-$PRIMARY_REF}" >> $GITHUB_OUTPUT
+                echo "::notice::Successfully checked out ${ALTERNATE_REPO} at ref ${ALTERNATE_REF:-$PRIMARY_REF}"
+              else
+                echo "repository=${PRIMARY_REPO}" >> $GITHUB_OUTPUT
+                echo "ref=${PRIMARY_REF:-default}" >> $GITHUB_OUTPUT
+                echo "::notice::Successfully checked out ${PRIMARY_REPO} at ref ${PRIMARY_REF:-default}"
+              fi

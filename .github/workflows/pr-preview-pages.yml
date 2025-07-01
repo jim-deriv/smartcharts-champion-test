@@ -9,102 +9,234 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  security_check:
+    runs-on: ubuntu-latest
+    outputs:
+      is_safe: ${{ steps.check.outputs.is_safe }}
+    steps:
+      - name: Check if PR is from a fork
+        id: check
+        run: |
+          if [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
+            echo "::warning::PR is from a fork. Manual approval required for security."
+            echo "is_safe=false" >> $GITHUB_OUTPUT
+          else
+            echo "::notice::PR is from the same repository. Safe to proceed."
+            echo "is_safe=true" >> $GITHUB_OUTPUT
+          fi
+
   build_and_deploy:
-    runs-on: Ubuntu-latest
+    needs: security_check
+    if: needs.security_check.outputs.is_safe == 'true'
+    runs-on: ubuntu-latest
     permissions:
       contents: write
       checks: write
       pull-requests: write
+      pages: write
+    env:
+      FLUTTER_VERSION: '3.24.1'
+      NODE_VERSION: '18.x'
+      FLUTTER_CHART_REF: '21c008fcc901b942ac8fce2f535350e7c34b4743'
     steps:
       - name: Post preview build comment
         if: github.event_name == 'pull_request_target'
         id: post_preview_build_comment
         uses: 'deriv-com/shared-actions/.github/actions/post_preview_build_comment@v1'
         with:
-          issue_number: ${{github.event.number}}
-          head_sha: ${{github.event.pull_request.head.sha}}
+          issue_number: ${{ github.event.number }}
+          head_sha: ${{ github.event.pull_request.head.sha }}
+
       - name: Checkout SmartCharts Champion
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: deriv-com/smartcharts-champion
           path: smartcharts-champion
-          ref: ${{github.event_name == 'pull_request_target' && github.head_ref || 'master'}}
+          ref: ${{ github.event_name == 'pull_request_target' && github.head_ref || 'master' }}
+          token: ${{ github.token }}
+          fetch-depth: 0
 
-      - name: Custom flutter-chart
+      - name: Checkout flutter-chart
         id: flutter_chart
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: 'deriv-com/flutter-chart'
           path: flutter-chart
-          ref: 21c008fcc901b942ac8fce2f535350e7c34b4743
+          ref: ${{ env.FLUTTER_CHART_REF }}
+          token: ${{ github.token }}
 
-      - uses: subosito/flutter-action@v2
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.24.1'
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: 'stable'
           cache: true
 
-      - name: Add SSH key
+      - name: Setup SSH key
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_KEY }}" > ~/.ssh/github_action_key
           chmod 600 ~/.ssh/github_action_key
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
 
-      - name: Build flutter
+      - name: Build Flutter application
         env:
-          GIT_SSH_COMMAND: 'ssh -i ~/.ssh/github_action_key'
+          GIT_SSH_COMMAND: 'ssh -i ~/.ssh/github_action_key -o StrictHostKeyChecking=no'
         run: |
+          set -e
           cd smartcharts-champion/chart_app
-          flutter pub get
-          flutter build web --web-renderer html --release
 
-      - name: Setup Node
+          echo "::group::Installing Flutter dependencies"
+          flutter pub get
+          echo "::endgroup::"
+
+          echo "::group::Building Flutter web application"
+          flutter build web --web-renderer html --release --verbose
+          echo "::endgroup::"
+
+          # Verify build output
+          if [ ! -d "build/web" ]; then
+            echo "::error::Flutter build failed - no build/web directory found"
+            exit 1
+          fi
+
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20.x
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: smartcharts-champion/package-lock.json
 
-      - name: Setup SmartCharts Champion
-        run: cd smartcharts-champion && npm install
+      - name: Install SmartCharts Champion dependencies
+        run: |
+          set -e
+          cd smartcharts-champion
+          echo "::group::Installing Node.js dependencies"
+          npm ci
+          echo "::endgroup::"
 
       - name: Build SmartCharts Champion
-        run: cd smartcharts-champion && npm run build
-
-      - name: Copy Flutter build to dist
         run: |
-          # Copy Flutter build artifacts to the dist directory
+          set -e
+          cd smartcharts-champion
+          echo "::group::Building SmartCharts Champion"
+          npm run build
+          echo "::endgroup::"
+
+          # Verify build output
+          if [ ! -d "dist" ]; then
+            echo "::error::SmartCharts Champion build failed - no dist directory found"
+            exit 1
+          fi
+
+      - name: Integrate Flutter build
+        run: |
+          set -e
+          echo "::group::Copying Flutter build to dist"
+
+          # Create Flutter directory in dist
           mkdir -p smartcharts-champion/dist/flutter
+
+          # Copy Flutter build artifacts
           cp -r smartcharts-champion/chart_app/build/web/* smartcharts-champion/dist/flutter/
+
+          # Verify copy was successful
+          if [ ! -f "smartcharts-champion/dist/flutter/index.html" ]; then
+            echo "::error::Failed to copy Flutter build artifacts"
+            exit 1
+          fi
+
+          echo "::notice::Successfully integrated Flutter build"
+          echo "::endgroup::"
 
       - name: Configure Git
         run: |
-          git config user.name github-actions
-          git config user.email github-actions@github.com
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Set deployment branch name
-        id: set_branch
+      - name: Set deployment parameters
+        id: set_deploy_params
         run: |
           if [ "${{ github.event_name }}" == "pull_request_target" ]; then
-            echo "branch_name=pr-${{ github.event.number }}" >> $GITHUB_OUTPUT
+            BRANCH_NAME="pr-${{ github.event.number }}"
+            DEPLOY_URL="https://${{ github.repository_owner }}.github.io/smartcharts-champion/${BRANCH_NAME}"
+            echo "branch_name=${BRANCH_NAME}" >> $GITHUB_OUTPUT
+            echo "deploy_url=${DEPLOY_URL}" >> $GITHUB_OUTPUT
+            echo "is_preview=true" >> $GITHUB_OUTPUT
           else
             echo "branch_name=gh-pages" >> $GITHUB_OUTPUT
+            echo "deploy_url=https://${{ github.repository_owner }}.github.io/smartcharts-champion" >> $GITHUB_OUTPUT
+            echo "is_preview=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Deploy to GitHub Pages
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          BRANCH_NAME: ${{ steps.set_deploy_params.outputs.branch_name }}
+          IS_PREVIEW: ${{ steps.set_deploy_params.outputs.is_preview }}
+          DEPLOY_URL: ${{ steps.set_deploy_params.outputs.deploy_url }}
         run: |
+          set -e
           cd smartcharts-champion
-          if [ "${{ github.event_name }}" == "pull_request_target" ]; then
-            npm run gh-pages:folder ${{ steps.set_branch.outputs.branch_name }}
+
+          echo "::group::Deploying to GitHub Pages"
+          echo "::notice::Deploying to branch: $BRANCH_NAME"
+
+          if [ "$IS_PREVIEW" == "true" ]; then
+            echo "::notice::Running preview deployment to folder: $BRANCH_NAME"
+            npm run gh-pages:folder -- "$BRANCH_NAME"
           else
+            echo "::notice::Running main deployment"
             npm run gh-pages
           fi
-          
+
+          echo "::notice::Deployment completed successfully"
+          echo "::notice::Site will be available at: $DEPLOY_URL"
+          echo "::endgroup::"
+
+      - name: Wait for deployment
+        if: steps.set_deploy_params.outputs.is_preview == 'true'
+        run: |
+          echo "::notice::Waiting for GitHub Pages deployment to complete..."
+          sleep 30
+
       - name: Generate preview link comment
         if: github.event_name == 'pull_request_target' && steps.post_preview_build_comment.outcome == 'success'
         uses: 'deriv-com/shared-actions/.github/actions/post_preview_link_comment@v1'
         with:
-          issue_number: ${{github.event.number}}
-          check_run_id: ${{steps.post_preview_build_comment.outputs.check_run_id}}
-          preview_url: https://${{ github.repository_owner }}.github.io/smartcharts-champion/${{ steps.set_branch.outputs.branch_name }}
-          status: ${{job.status}}
+          issue_number: ${{ github.event.number }}
+          check_run_id: ${{ steps.post_preview_build_comment.outputs.check_run_id }}
+          preview_url: ${{ steps.set_deploy_params.outputs.deploy_url }}
+          status: ${{ job.status }}
+
+      - name: Cleanup SSH key
+        if: always()
+        run: |
+          rm -f ~/.ssh/github_action_key
+
+      - name: Report failure
+        if: failure()
+        uses: actions/github-script@v7
+        continue-on-error: true
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            if (context.eventName === 'pull_request_target') {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+                body: `## ❌ Preview deployment failed
+
+                The preview deployment for this PR failed to build or deploy.
+
+                Please check the [workflow run](${context.payload.repository.html_url}/actions/runs/${context.runId}) for details.
+
+                **Common issues:**
+                - Build errors in Flutter or Node.js components
+                - Missing dependencies
+                - Configuration issues
+
+                Please fix the issues and push new changes to retry the deployment.`
+              });
+            }

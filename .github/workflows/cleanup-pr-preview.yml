@@ -10,39 +10,147 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      pages: write
     steps:
+      - name: Check if gh-pages branch exists
+        id: check_branch
+        run: |
+          # Check if gh-pages branch exists in the remote repository
+          if git ls-remote --heads --exit-code https://github.com/${{ github.repository }}.git gh-pages >/dev/null 2>&1; then
+            echo "::notice::gh-pages branch exists"
+            echo "branch_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "::notice::gh-pages branch does not exist"
+            echo "branch_exists=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Checkout gh-pages branch
-        uses: actions/checkout@v3
+        if: steps.check_branch.outputs.branch_exists == 'true'
+        uses: actions/checkout@v4
         with:
           ref: gh-pages
+          fetch-depth: 0
+          token: ${{ github.token }}
           
       - name: Setup Git
+        if: steps.check_branch.outputs.branch_exists == 'true'
         run: |
-          git config --global user.name "GitHub Actions Bot"
-          git config --global user.email "actions@github.com"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
-      - name: Remove PR Preview
+      - name: Check and Remove PR Preview
+        if: steps.check_branch.outputs.branch_exists == 'true'
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          if [ -d "pr-preview/$PR_NUMBER" ]; then
-            git rm -rf "pr-preview/$PR_NUMBER"
-            git commit -m "Remove PR preview for #$PR_NUMBER"
-            git push origin gh-pages
+          set -e
+
+          PREVIEW_DIR="pr-preview/$PR_NUMBER"
+
+          if [ -d "$PREVIEW_DIR" ]; then
+            echo "::notice::Found preview directory: $PREVIEW_DIR"
+
+            # Remove the directory
+            git rm -rf "$PREVIEW_DIR"
+
+            # Check if there are changes to commit
+            if git diff --cached --quiet; then
+              echo "::notice::No changes to commit after removing directory"
+              echo "preview_removed=false" >> $GITHUB_ENV
+            else
+              # Commit and push changes
+              git commit -m "🧹 Remove PR preview for #$PR_NUMBER
+
+              - Removed preview deployment directory: $PREVIEW_DIR
+              - Triggered by PR closure
+              - Action run: ${{ github.run_id }}"
+
+              echo "::notice::Pushing changes to gh-pages branch"
+              git push origin gh-pages
+              echo "preview_removed=true" >> $GITHUB_ENV
+            fi
           else
-            echo "No preview directory found for PR #$PR_NUMBER"
+            echo "::notice::No preview directory found for PR #$PR_NUMBER at path: $PREVIEW_DIR"
+            echo "preview_removed=false" >> $GITHUB_ENV
           fi
           
-      - name: Comment on PR
-        uses: actions/github-script@v6
+      - name: Comment on PR (Success)
+        if: steps.check_branch.outputs.branch_exists == 'true' && env.preview_removed == 'true'
+        uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ github.token }}
           script: |
-            const prNumber = context.issue.number;
-            
-            github.rest.issues.createComment({
+            const prNumber = context.payload.pull_request.number;
+            const prTitle = context.payload.pull_request.title;
+
+            await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: prNumber,
-              body: `## 🧹 Preview deployment cleaned up\n\nThe preview deployment for this PR has been removed.`
+              body: `## 🧹 Preview deployment cleaned up
+
+              The preview deployment for **"${prTitle}"** has been successfully removed from the gh-pages branch.
+
+              - **PR #${prNumber}** preview site is no longer accessible
+              - Preview directory \`pr-preview/${prNumber}\` has been deleted
+              - Changes committed to gh-pages branch
+
+              _This cleanup was triggered automatically when the PR was closed._`
+            });
+
+      - name: Comment on PR (No Preview or Branch)
+        if: steps.check_branch.outputs.branch_exists == 'false' || env.preview_removed == 'false'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const prNumber = context.payload.pull_request.number;
+            let message = `## ℹ️ No preview deployment found
+
+            No preview deployment was found for PR #${prNumber} to clean up.
+
+            This could be because:`;
+
+            if ('${{ steps.check_branch.outputs.branch_exists }}' === 'false') {
+              message += `
+              - The gh-pages branch does not exist in this repository
+              - No preview deployments have been created yet`;
+            } else {
+              message += `
+              - The preview was never created
+              - The preview was already manually removed
+              - The preview directory path has changed`;
+            }
+
+            message += `
+
+            _No action was taken._`;
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: message
+            });
+
+      - name: Handle cleanup errors
+        if: failure()
+        uses: actions/github-script@v7
+        continue-on-error: true
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const prNumber = context.payload.pull_request.number;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: `## ⚠️ Preview cleanup failed
+
+              There was an error while trying to clean up the preview deployment for PR #${prNumber}.
+
+              Please check the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for more details.
+
+              You may need to manually remove the preview directory from the gh-pages branch if it exists.`
             });
