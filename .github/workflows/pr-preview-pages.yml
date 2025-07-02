@@ -164,7 +164,7 @@ jobs:
           cache: true
 
       - name: Cache Flutter dependencies
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~/.pub-cache
@@ -175,7 +175,7 @@ jobs:
             flutter-deps-
 
       - name: Cache Flutter build
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: chart_app/build
           key: flutter-build-${{ hashFiles('chart_app/**/*.dart', 'chart_app/pubspec.yaml') }}
@@ -266,7 +266,7 @@ jobs:
           cache: 'npm'
 
       - name: Cache node_modules
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: node_modules
           key: node-modules-${{ hashFiles('package-lock.json') }}
