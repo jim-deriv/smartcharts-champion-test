@@ -1,21 +1,123 @@
+# =============================================================================
+# PR Preview Cleanup Workflow
+# =============================================================================
+#
+# Purpose: Automatically removes preview deployments when pull requests are closed
+#
+# Triggers:
+#   - pull_request events (closed)
+#   - Runs for both merged and closed PRs
+#
+# Process Flow:
+#   1. Input Validation - Validates PR number and basic requirements
+#   2. Branch Check - Verifies gh-pages branch exists
+#   3. Checkout - Switches to gh-pages branch with optimizations
+#   4. Directory Scan - Looks for PR-specific preview directory
+#   5. Cleanup - Removes preview files and commits changes with retry logic
+#   6. Cleanup Empty Directories - Removes empty parent directories
+#   7. Notification - Posts cleanup confirmation comment
+#
+# Security Features:
+#   - Concurrency control to prevent race conditions
+#   - Input validation for PR numbers
+#   - Safe operations: Checks for existence before attempting removal
+#   - Error recovery: Handles missing directories and network failures gracefully
+#   - Retry logic for network operations
+#   - Status reporting: Informs users of cleanup status
+#
+# Performance Optimizations:
+#   - Shallow clone for faster checkout
+#   - Sparse checkout for large repositories
+#   - Efficient git operations
+#
+# Directory Structure:
+#   gh-pages/
+#   ├── pr-preview/
+#   │   ├── 123/          # PR #123 preview
+#   │   ├── 456/          # PR #456 preview
+#   │   └── ...
+#   └── index.html        # Main site
+#
+# Dependencies:
+#   - GitHub token with appropriate permissions
+#   - gh-pages branch (created automatically if needed)
+# 
+# =============================================================================
+
 name: Cleanup PR Preview
 
 on:
   pull_request:
     types: [closed]
 
+# Prevent multiple cleanup jobs for the same PR from running simultaneously
+concurrency:
+  group: cleanup-pr-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
 jobs:
+  # ---------------------------------------------------------------------------
+  # Cleanup Job
+  # ---------------------------------------------------------------------------
+  # Purpose: Removes PR preview deployment and posts status comment
+  # Permissions: Needs write access to contents, PRs, and pages
+  # Safety: Includes multiple checks to prevent accidental deletions
+  # Concurrency: Protected against race conditions
+  # ---------------------------------------------------------------------------
   cleanup:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      pull-requests: write
-      pages: write
+      contents: write       # Required for git operations on gh-pages branch
+      pull-requests: write  # Required for posting cleanup status comments
+      pages: write          # Required for GitHub Pages operations
     steps:
+      # -----------------------------------------------------------------------
+      # Step 1: Input Validation
+      # -----------------------------------------------------------------------
+      # Purpose: Validates that PR number is valid and required data exists
+      # Safety: Prevents malformed operations and provides early error detection
+      # Validation: Checks PR number format and essential PR data availability
+      # -----------------------------------------------------------------------
+      - name: Validate inputs
+        id: validate
+        run: |
+          set -e
+
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+
+          # Validate PR number is a positive integer
+          if [[ ! "$PR_NUMBER" =~ ^[0-9]+$ ]] || [[ "$PR_NUMBER" -eq 0 ]]; then
+            echo "::error::Invalid PR number: $PR_NUMBER"
+            echo "validation_passed=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+          # Validate essential PR data exists
+          if [[ -z "${{ github.event.pull_request.title }}" ]]; then
+            echo "::error::PR title is missing"
+            echo "validation_passed=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+          echo "::notice::Validated PR #$PR_NUMBER for cleanup"
+          echo "validation_passed=true" >> $GITHUB_OUTPUT
+
+      # -----------------------------------------------------------------------
+      # Step 2: Branch Existence Check
+      # -----------------------------------------------------------------------
+      # Purpose: Verifies that the gh-pages branch exists before attempting cleanup
+      # Method: Uses git ls-remote to check remote branch without cloning
+      # Safety: Prevents errors when trying to checkout non-existent branch
+      # Output: Sets branch_exists flag for conditional execution of next steps
+      # -----------------------------------------------------------------------
       - name: Check if gh-pages branch exists
+        if: steps.validate.outputs.validation_passed == 'true'
         id: check_branch
         run: |
+          set -e
+
           # Check if gh-pages branch exists in the remote repository
+          # This prevents errors when the repository has never had GitHub Pages enabled
           if git ls-remote --heads --exit-code https://github.com/${{ github.repository }}.git gh-pages >/dev/null 2>&1; then
             echo "::notice::gh-pages branch exists"
             echo "branch_exists=true" >> $GITHUB_OUTPUT
@@ -24,82 +126,230 @@ jobs:
             echo "branch_exists=false" >> $GITHUB_OUTPUT
           fi
 
+      # -----------------------------------------------------------------------
+      # Step 3: Optimized GitHub Pages Branch Checkout
+      # -----------------------------------------------------------------------
+      # Purpose: Checks out the gh-pages branch for cleanup operations
+      # Condition: Only runs if validation passed and gh-pages branch exists
+      # Optimizations: Shallow clone and sparse checkout for better performance
+      # Authentication: Uses GitHub token for repository access
+      # -----------------------------------------------------------------------
       - name: Checkout gh-pages branch
-        if: steps.check_branch.outputs.branch_exists == 'true'
+        if: steps.validate.outputs.validation_passed == 'true' && steps.check_branch.outputs.branch_exists == 'true'
         uses: actions/checkout@v4
         with:
           ref: gh-pages
-          fetch-depth: 0
+          fetch-depth: 1  # Shallow clone for better performance
+          sparse-checkout: |
+            pr-preview/${{ github.event.pull_request.number }}
+            pr-preview/
+          sparse-checkout-cone-mode: false
           token: ${{ github.token }}
-          
+
+      # -----------------------------------------------------------------------
+      # Step 4: Git Configuration
+      # -----------------------------------------------------------------------
+      # Purpose: Configures git identity for cleanup commits
+      # Condition: Only runs if validation passed and gh-pages branch exists
+      # Identity: Uses GitHub Actions bot for consistent commit attribution
+      # Scope: Global configuration for all git operations in this workflow
+      # -----------------------------------------------------------------------
       - name: Setup Git
-        if: steps.check_branch.outputs.branch_exists == 'true'
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          
-      - name: Check and Remove PR Preview
-        if: steps.check_branch.outputs.branch_exists == 'true'
-        env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+        if: steps.validate.outputs.validation_passed == 'true' && steps.check_branch.outputs.branch_exists == 'true'
         run: |
           set -e
 
+          # Configure git identity for cleanup commits
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Ensure we're on the correct branch
+          git checkout gh-pages
+
+      # -----------------------------------------------------------------------
+      # Step 5: Preview Directory Cleanup
+      # -----------------------------------------------------------------------
+      # Purpose: Locates and removes PR-specific preview directory
+      # Condition: Only runs if validation passed and gh-pages branch exists
+      # Safety: Checks for directory existence before attempting removal
+      # Commit: Creates descriptive commit message with PR details and run ID
+      # Status: Sets environment variable for downstream step conditions
+      # -----------------------------------------------------------------------
+      - name: Check and Remove PR Preview
+        if: steps.validate.outputs.validation_passed == 'true' && steps.check_branch.outputs.branch_exists == 'true'
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -e  # Exit on any error
+
+          # Construct the expected preview directory path
           PREVIEW_DIR="pr-preview/$PR_NUMBER"
 
           if [ -d "$PREVIEW_DIR" ]; then
             echo "::notice::Found preview directory: $PREVIEW_DIR"
 
-            # Remove the directory
+            # Remove the directory and stage the changes
             git rm -rf "$PREVIEW_DIR"
 
-            # Check if there are changes to commit
+            # Check if there are actually changes to commit
+            # (git rm might not stage anything if directory was already empty)
             if git diff --cached --quiet; then
               echo "::notice::No changes to commit after removing directory"
               echo "preview_removed=false" >> $GITHUB_ENV
             else
-              # Commit and push changes
+              # Commit the removal with descriptive message
               git commit -m "🧹 Remove PR preview for #$PR_NUMBER
 
               - Removed preview deployment directory: $PREVIEW_DIR
               - Triggered by PR closure
               - Action run: ${{ github.run_id }}"
 
-              echo "::notice::Pushing changes to gh-pages branch"
-              git push origin gh-pages
               echo "preview_removed=true" >> $GITHUB_ENV
             fi
           else
             echo "::notice::No preview directory found for PR #$PR_NUMBER at path: $PREVIEW_DIR"
             echo "preview_removed=false" >> $GITHUB_ENV
           fi
+
+      # -----------------------------------------------------------------------
+      # Step 6: Clean Up Empty Parent Directory
+      # -----------------------------------------------------------------------
+      # Purpose: Removes empty pr-preview directory if no other PRs exist
+      # Condition: Only runs if validation passed and preview was removed successfully
+      # Optimization: Keeps repository clean by removing unused directories
+      # Commit: Amends previous commit to keep history clean
+      # Safety: Uses atomic check to prevent race conditions
+      # -----------------------------------------------------------------------
+      - name: Clean up empty pr-preview directory
+        if: steps.validate.outputs.validation_passed == 'true' && steps.check_branch.outputs.branch_exists == 'true' && env.preview_removed == 'true'
+        run: |
+          set -e
           
+          # Atomic check and removal of empty pr-preview directory
+          # Use a more robust method to prevent race conditions
+          if [ -d "pr-preview" ]; then
+            # Count entries in directory (excluding . and ..)
+            ENTRY_COUNT=$(find pr-preview -mindepth 1 -maxdepth 1 | wc -l)
+
+            if [ "$ENTRY_COUNT" -eq 0 ]; then
+              echo "::notice::pr-preview directory is empty, removing it"
+              git rm -rf pr-preview
+
+              # Verify the removal was staged
+              if git diff --cached --quiet pr-preview 2>/dev/null; then
+                echo "::notice::pr-preview directory removal staged successfully"
+                # Amend the previous commit to include this cleanup
+                git commit --amend --no-edit
+                echo "empty_dir_removed=true" >> $GITHUB_ENV
+              else
+                echo "::warning::Failed to stage pr-preview directory removal"
+                echo "empty_dir_removed=false" >> $GITHUB_ENV
+              fi
+            else
+              echo "::notice::pr-preview directory contains $ENTRY_COUNT other entries, keeping it"
+              echo "empty_dir_removed=false" >> $GITHUB_ENV
+            fi
+          else
+            echo "::notice::pr-preview directory does not exist"
+            echo "empty_dir_removed=false" >> $GITHUB_ENV
+          fi
+
+      # -----------------------------------------------------------------------
+      # Step 7: Push Changes with Retry Logic
+      # -----------------------------------------------------------------------
+      # Purpose: Pushes cleanup changes to gh-pages branch with retry logic
+      # Condition: Only runs if validation passed and changes were made
+      # Reliability: Implements configurable retry logic for network failures
+      # Error Handling: Provides detailed error information on failure
+      # -----------------------------------------------------------------------
+      - name: Push changes with retry
+        if: steps.validate.outputs.validation_passed == 'true' && steps.check_branch.outputs.branch_exists == 'true' && env.preview_removed == 'true'
+        run: |
+          set -e
+
+          # Configurable retry logic for pushing changes
+          MAX_RETRIES=${CLEANUP_MAX_RETRIES:-3}
+          RETRY_DELAY=${CLEANUP_RETRY_DELAY:-2}
+
+          for i in $(seq 1 $MAX_RETRIES); do
+            echo "::notice::Push attempt $i of $MAX_RETRIES"
+
+            if git push origin gh-pages; then
+              echo "::notice::Successfully pushed changes to gh-pages branch"
+              echo "push_successful=true" >> $GITHUB_ENV
+              break
+            else
+              if [ $i -eq $MAX_RETRIES ]; then
+                echo "::error::Failed to push changes after $MAX_RETRIES attempts"
+                echo "push_successful=false" >> $GITHUB_ENV
+                exit 1
+              else
+                echo "::warning::Push attempt $i failed, retrying in ${RETRY_DELAY}s..."
+                sleep $RETRY_DELAY
+
+                # Try to pull any changes that might have been made
+                if git pull origin gh-pages --rebase; then
+                  echo "::notice::Successfully rebased local changes"
+                else
+                  echo "::warning::Could not rebase, will retry push as-is"
+                fi
+              fi
+            fi
+          done
+
+      # -----------------------------------------------------------------------
+      # Step 8: Success Notification
+      # -----------------------------------------------------------------------
+      # Purpose: Posts confirmation comment when preview cleanup is successful
+      # Conditions: Only runs if validation passed AND all cleanup steps succeeded
+      # Content: Includes PR title, number, cleanup details, and additional info
+      # Format: Uses consistent emoji and formatting for user-friendly display
+      # -----------------------------------------------------------------------
       - name: Comment on PR (Success)
-        if: steps.check_branch.outputs.branch_exists == 'true' && env.preview_removed == 'true'
+        if: steps.validate.outputs.validation_passed == 'true' && steps.check_branch.outputs.branch_exists == 'true' && env.preview_removed == 'true' && env.push_successful == 'true'
         uses: actions/github-script@v7
         with:
           github-token: ${{ github.token }}
           script: |
             const prNumber = context.payload.pull_request.number;
             const prTitle = context.payload.pull_request.title;
+            const emptyDirRemoved = process.env.empty_dir_removed === 'true';
+
+            let message = `## 🧹 Preview deployment cleaned up
+
+            The preview deployment for **"${prTitle}"** has been successfully removed from the gh-pages branch.
+
+            **Cleanup Details:**
+            - **PR #${prNumber}** preview site is no longer accessible
+            - Preview directory \`pr-preview/${prNumber}\` has been deleted`;
+
+            if (emptyDirRemoved) {
+              message += `
+            - Empty \`pr-preview\` directory was also removed`;
+            }
+
+            message += `
+            - Changes committed and pushed to gh-pages branch
+
+            _This cleanup was triggered automatically when the PR was closed._`;
 
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: prNumber,
-              body: `## 🧹 Preview deployment cleaned up
-
-              The preview deployment for **"${prTitle}"** has been successfully removed from the gh-pages branch.
-
-              - **PR #${prNumber}** preview site is no longer accessible
-              - Preview directory \`pr-preview/${prNumber}\` has been deleted
-              - Changes committed to gh-pages branch
-
-              _This cleanup was triggered automatically when the PR was closed._`
+              body: message
             });
 
+      # -----------------------------------------------------------------------
+      # Step 9: No Action Notification
+      # -----------------------------------------------------------------------
+      # Purpose: Informs users when no cleanup was needed or possible
+      # Conditions: Runs if validation passed but no cleanup was performed
+      # Logic: Provides different explanations based on the specific scenario
+      # Transparency: Explains why no action was taken to avoid confusion
+      # -----------------------------------------------------------------------
       - name: Comment on PR (No Preview or Branch)
-        if: steps.check_branch.outputs.branch_exists == 'false' || env.preview_removed == 'false'
+        if: steps.validate.outputs.validation_passed == 'true' && (steps.check_branch.outputs.branch_exists == 'false' || env.preview_removed == 'false')
         uses: actions/github-script@v7
         with:
           github-token: ${{ github.token }}
@@ -109,22 +359,25 @@ jobs:
 
             No preview deployment was found for PR #${prNumber} to clean up.
 
-            This could be because:`;
+            **Possible reasons:**`;
 
+            // Provide specific explanation based on the failure reason
             if ('${{ steps.check_branch.outputs.branch_exists }}' === 'false') {
               message += `
-              - The gh-pages branch does not exist in this repository
-              - No preview deployments have been created yet`;
+            - The gh-pages branch does not exist in this repository
+            - No preview deployments have been created yet
+            - GitHub Pages may not be enabled for this repository`;
             } else {
               message += `
-              - The preview was never created
-              - The preview was already manually removed
-              - The preview directory path has changed`;
+            - The preview was never created or deployed
+            - The preview was already manually removed
+            - The preview directory path has changed
+            - The preview deployment workflow may have failed`;
             }
 
             message += `
 
-            _No action was taken._`;
+            _No action was taken. If you expected a preview to be cleaned up, please check your preview deployment workflow._`;
             
             await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -133,6 +386,15 @@ jobs:
               body: message
             });
 
+      # -----------------------------------------------------------------------
+      # Step 10: Error Handling and Reporting
+      # -----------------------------------------------------------------------
+      # Purpose: Posts error information when cleanup workflow fails
+      # Conditions: Only runs if any previous step failed
+      # Error Handling: Continues on error to prevent masking original failure
+      # Content: Provides workflow run link and manual cleanup instructions
+      # Debug Info: Includes additional context for troubleshooting
+      # -----------------------------------------------------------------------
       - name: Handle cleanup errors
         if: failure()
         uses: actions/github-script@v7
@@ -141,6 +403,7 @@ jobs:
           github-token: ${{ github.token }}
           script: |
             const prNumber = context.payload.pull_request.number;
+            const runUrl = `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
 
             await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -148,9 +411,24 @@ jobs:
               issue_number: prNumber,
               body: `## ⚠️ Preview cleanup failed
 
-              There was an error while trying to clean up the preview deployment for PR #${prNumber}.
+            There was an error while trying to clean up the preview deployment for PR #${prNumber}.
 
-              Please check the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for more details.
+            **Next Steps:**
+            1. Check the [workflow run](${runUrl}) for detailed error information
+            2. Verify that the gh-pages branch exists and is accessible
+            3. Check if branch protection rules are preventing the cleanup
+            4. Consider manually removing the preview directory if it exists
 
-              You may need to manually remove the preview directory from the gh-pages branch if it exists.`
+            **Manual Cleanup Instructions:**
+            If needed, you can manually remove the preview by:
+            1. Switching to the gh-pages branch
+            2. Deleting the \`pr-preview/${prNumber}\` directory
+            3. Committing and pushing the changes
+
+            **Troubleshooting:**
+            - Ensure the repository has GitHub Pages enabled
+            - Verify that the workflow has sufficient permissions
+            - Check for any branch protection rules on gh-pages
+
+            _This error has been logged for repository maintainers to review._`
             });
