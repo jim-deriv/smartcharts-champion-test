@@ -189,7 +189,7 @@ jobs:
           ssh-keyscan github.com >> ~/.ssh/known_hosts
 
       - name: Build Flutter application with retry
-        uses: nick-fields/retry@v2
+        uses: nick-fields/retry@v3
         env:
           GIT_SSH_COMMAND: 'ssh -i ~/.ssh/github_action_key -o StrictHostKeyChecking=no'
         with:
@@ -273,14 +273,14 @@ jobs:
           restore-keys: node-modules-
 
       - name: Install dependencies with retry
-        uses: nick-fields/retry@v2
+        uses: nick-fields/retry@v3
         with:
           timeout_minutes: 10
           max_attempts: 3
           command: npm ci
 
       - name: Build SmartCharts Champion with retry
-        uses: nick-fields/retry@v2
+        uses: nick-fields/retry@v3
         with:
           timeout_minutes: 15
           max_attempts: 3
@@ -438,7 +438,7 @@ jobs:
           echo "::notice::Total files in deployment: $FILE_COUNT"
 
       - name: Deploy to GitHub Pages with retry
-        uses: nick-fields/retry@v2
+        uses: nick-fields/retry@v3
         env:
           GH_TOKEN: ${{ github.token }}
           BRANCH_NAME: ${{ needs.security_and_setup.outputs.branch_name }}
