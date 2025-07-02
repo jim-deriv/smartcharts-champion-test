@@ -125,7 +125,7 @@ jobs:
       - name: Post initial build status
         if: github.event_name == 'pull_request'
         id: post_preview_build_comment
-        uses: 'deriv-com/shared-actions/.github/actions/post_preview_build_comment@v1'
+        uses: 'deriv-com/shared-actions/.github/actions/post_preview_build_comment@v3'
         with:
           issue_number: ${{ github.event.number }}
           head_sha: ${{ github.event.pull_request.head.sha }}
@@ -503,7 +503,7 @@ jobs:
 
       - name: Generate success notification
         if: github.event_name == 'pull_request' && success()
-        uses: 'deriv-com/shared-actions/.github/actions/post_preview_link_comment@v1'
+        uses: 'deriv-com/shared-actions/.github/actions/post_preview_link_comment@v3'
         with:
           issue_number: ${{ github.event.number }}
           check_run_id: ${{ needs.security_and_setup.outputs.check_run_id }}
