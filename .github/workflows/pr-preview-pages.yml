@@ -220,7 +220,7 @@ jobs:
           echo "FLUTTER_BUILD_SIZE=$FLUTTER_SIZE" >> $GITHUB_ENV
 
       - name: Upload Flutter build artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: flutter-build
           path: chart_app/build/web
@@ -303,7 +303,7 @@ jobs:
           echo "NODEJS_BUILD_SIZE=$NODEJS_SIZE" >> $GITHUB_ENV
 
       - name: Upload Node.js build artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: nodejs-build
           path: dist
