@@ -1,5 +1,5 @@
 # =============================================================================
-# Smart Checkout Action
+# SmartCharts Checkout Action
 # =============================================================================
 #
 # Purpose: Provides intelligent repository checkout with fallback support
@@ -23,7 +23,7 @@
 #
 # =============================================================================
 
-name: "Smart Charts Checkout"
+name: "SmartCharts Checkout"
 description: "Checkout with fallback to alternate repository/ref if primary ref does not exist"
 
 inputs:

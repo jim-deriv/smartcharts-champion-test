@@ -82,10 +82,8 @@ This directory contains reusable GitHub Actions for the SmartCharts Champion pro
 - `workflow_run_id`: GitHub workflow run ID
 - `repository_url`: Repository URL
 
-### 6. Smart Charts Checkout (`checkout/`)
+### 6. SmartCharts Checkout (`checkout/`)
 **Purpose**: Provides intelligent repository checkout with fallback support
-
-**Note**: This is an existing action that was kept as-is due to its appropriate structure and cohesive functionality.
 
 **Features**:
 - Primary/Fallback Logic: Attempts primary repository/ref, falls back if needed
