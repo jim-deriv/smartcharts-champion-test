@@ -23,7 +23,7 @@
 #
 # =============================================================================
 
-name: "Smart Checkout"
+name: "Smart Charts Checkout"
 description: "Checkout with fallback to alternate repository/ref if primary ref does not exist"
 
 inputs:

@@ -9,7 +9,7 @@ This directory contains GitHub Actions workflows and custom actions for the Smar
   - [PR Preview Pages](#pr-preview-pages)
   - [Cleanup PR Preview](#cleanup-pr-preview)
 - [Custom Actions](#custom-actions)
-  - [Smart Checkout](#smart-checkout)
+  - [Smart Charts Checkout](#smart-charts-checkout)
 - [Configuration](#configuration)
 - [Dependencies](#dependencies)
 - [Troubleshooting](#troubleshooting)
@@ -127,7 +127,7 @@ CLEANUP_RETRY_DELAY: 2      # Delay between retries (seconds)
 
 ## 🛠 Custom Actions
 
-### Smart Checkout
+### Smart Charts Checkout
 
 **File**: `.github/actions/checkout/action.yml`
 
