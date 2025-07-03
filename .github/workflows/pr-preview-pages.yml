@@ -1,5 +1,5 @@
 # =============================================================================
-# PR Preview Pages Workflow - Enhanced Version
+# PR Preview Pages Workflow
 # =============================================================================
 #
 # Purpose: Builds and deploys preview sites for pull requests to GitHub Pages
@@ -9,7 +9,7 @@
 #   - Only processes PRs from the same repository (security measure)
 #
 # Process Flow:
-#   1. Security Check - Validates PR source and inputs
+#   1. Security Check - Validates PR source and inputs using reusable action
 #   2. Parallel Build - Simultaneously builds Flutter and Node.js components
 #   3. Integration - Combines build outputs into unified deployment package
 #   4. Deployment - Deploys to GitHub Pages with verification
@@ -77,58 +77,43 @@ jobs:
   security_and_setup:
     runs-on: ubuntu-latest
     outputs:
-      is_safe: ${{ steps.security_check.outputs.is_safe }}
-      branch_name: ${{ steps.deploy_params.outputs.branch_name }}
-      deploy_url: ${{ steps.deploy_params.outputs.deploy_url }}
-      is_preview: ${{ steps.deploy_params.outputs.is_preview }}
-      build_base_path: ${{ steps.deploy_params.outputs.build_base_path }}
+      is_safe: ${{ steps.security_validation.outputs.is_safe }}
+      branch_name: ${{ steps.security_validation.outputs.branch_name }}
+      deploy_url: ${{ steps.security_validation.outputs.deploy_url }}
+      is_preview: ${{ steps.security_validation.outputs.is_preview }}
+      build_base_path: ${{ steps.security_validation.outputs.build_base_path }}
     steps:
-      - name: Security and input validation
-        id: security_check
-        run: |
-          # Validate PR number is numeric
-          if ! [[ "${{ github.event.number }}" =~ ^[0-9]+$ ]]; then
-            echo "::error::Invalid PR number format"
-            echo "is_safe=false" >> $GITHUB_OUTPUT
-            exit 1
-          fi
+      - name: Checkout for action access
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/actions/security-validation
+            .github/actions/preview-notifications
+          sparse-checkout-cone-mode: false
 
-          # Compare the source repository with the target repository
-          if [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
-            echo "::warning::PR is from a fork. Manual approval required for security."
-            echo "is_safe=false" >> $GITHUB_OUTPUT
-          else
-            echo "::notice::PR is from the same repository. Safe to proceed."
-            echo "is_safe=true" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Set deployment parameters
-        id: deploy_params
-        run: |
-          if [ "${{ github.event_name }}" == "pull_request" ]; then
-            # PR preview deployment configuration
-            BRANCH_NAME="pr-${{ github.event.number }}"
-            DEPLOY_URL="https://${{ github.repository_owner }}.github.io/smartcharts-champion/${BRANCH_NAME}"
-            BUILD_BASE_PATH="/smartcharts-champion/${BRANCH_NAME}"
-            echo "branch_name=${BRANCH_NAME}" >> $GITHUB_OUTPUT
-            echo "deploy_url=${DEPLOY_URL}" >> $GITHUB_OUTPUT
-            echo "build_base_path=${BUILD_BASE_PATH}" >> $GITHUB_OUTPUT
-            echo "is_preview=true" >> $GITHUB_OUTPUT
-          else
-            # Main branch deployment configuration
-            echo "branch_name=${{ env.GITHUB_PAGES_BRANCH }}" >> $GITHUB_OUTPUT
-            echo "deploy_url=https://${{ github.repository_owner }}.github.io/smartcharts-champion" >> $GITHUB_OUTPUT
-            echo "build_base_path=/smartcharts-champion" >> $GITHUB_OUTPUT
-            echo "is_preview=false" >> $GITHUB_OUTPUT
-          fi
+      - name: Security validation and setup
+        id: security_validation
+        uses: ./.github/actions/security-validation
+        with:
+          pr_number: ${{ github.event.number }}
+          event_name: ${{ github.event_name }}
+          head_repo_full_name: ${{ github.event.pull_request.head.repo.full_name }}
+          base_repo_full_name: ${{ github.repository }}
+          repository_owner: ${{ github.repository_owner }}
 
       - name: Post initial build status
-        if: github.event_name == 'pull_request'
-        id: post_preview_build_comment
-        uses: 'deriv-com/shared-actions/.github/actions/post_preview_build_comment@v1'
+        if: github.event_name == 'pull_request' && steps.security_validation.outputs.is_safe == 'true'
+        uses: ./.github/actions/preview-notifications
         with:
-          issue_number: ${{ github.event.number }}
+          github_token: ${{ github.token }}
+          pr_number: ${{ github.event.number }}
+          pr_title: ${{ github.event.pull_request.title }}
           head_sha: ${{ github.event.pull_request.head.sha }}
+          deploy_url: ${{ steps.security_validation.outputs.deploy_url }}
+          deployment_verified: 'false'
+          workflow_status: 'started'
+          workflow_run_id: ${{ github.run_id }}
+          repository_url: ${{ github.event.repository.html_url }}
 
   # ---------------------------------------------------------------------------
   # Flutter Build Job
@@ -141,105 +126,26 @@ jobs:
     needs: security_and_setup
     if: needs.security_and_setup.outputs.is_safe == 'true'
     runs-on: ubuntu-latest
+    outputs:
+      build_size: ${{ steps.flutter_build.outputs.build_size }}
     steps:
-      - name: Checkout repository
+      - name: Checkout for action access
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.merge_commit_sha }}
-          fetch-depth: 0
+          sparse-checkout: |
+            .github/actions/flutter-build
+          sparse-checkout-cone-mode: false
 
-      - name: Checkout flutter-chart
-        uses: actions/checkout@v4
+      - name: Build Flutter application
+        id: flutter_build
+        uses: ./.github/actions/flutter-build
         with:
-          repository: 'deriv-com/flutter-chart'
-          path: flutter-chart
-          ref: ${{ env.FLUTTER_CHART_REF }}
-          token: ${{ github.token }}
-
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: 'stable'
-          cache: true
-
-      - name: Cache Flutter dependencies
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.pub-cache
-            chart_app/.dart_tool
-          key: flutter-deps-${{ env.FLUTTER_VERSION }}-${{ hashFiles('**/pubspec.lock') }}
-          restore-keys: |
-            flutter-deps-${{ env.FLUTTER_VERSION }}-
-            flutter-deps-
-
-      - name: Cache Flutter build
-        uses: actions/cache@v3
-        with:
-          path: chart_app/build
-          key: flutter-build-${{ hashFiles('chart_app/**/*.dart', 'chart_app/pubspec.yaml') }}
-          restore-keys: flutter-build-
-
-      - name: Setup SSH key
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/github_action_key
-          chmod 600 ~/.ssh/github_action_key
-          ssh-keyscan github.com >> ~/.ssh/known_hosts
-
-      - name: Build Flutter application with retry
-        uses: nick-fields/retry@v2
-        env:
-          GIT_SSH_COMMAND: 'ssh -i ~/.ssh/github_action_key -o StrictHostKeyChecking=no'
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: |
-            set -e
-            cd chart_app
-
-            echo "::group::Installing Flutter dependencies"
-            flutter pub get
-            echo "::endgroup::"
-
-            echo "::group::Building Flutter web application"
-            flutter build web --web-renderer ${{ env.FLUTTER_WEB_RENDERER }} --release --verbose
-            echo "::endgroup::"
-
-            # Verify build output exists
-            if [ ! -d "build/web" ]; then
-              echo "::error::Flutter build failed - no build/web directory found"
-              exit 1
-            fi
-
-      - name: Report Flutter build size
-        run: |
-          FLUTTER_SIZE=$(du -sh chart_app/build/web | cut -f1)
-          echo "::notice::Flutter build size: $FLUTTER_SIZE"
-          echo "FLUTTER_BUILD_SIZE=$FLUTTER_SIZE" >> $GITHUB_ENV
-
-      - name: Upload Flutter build artifacts
-        uses: actions/upload-artifact@v3
-        with:
-          name: flutter-build
-          path: chart_app/build/web
-          retention-days: 1
-
-      - name: Cleanup SSH key
-        if: always()
-        run: |
-          # Secure cleanup of SSH key and known_hosts
-          if [ -f ~/.ssh/github_action_key ]; then
-            shred -vfz -n 3 ~/.ssh/github_action_key 2>/dev/null || rm -f ~/.ssh/github_action_key
-            echo "::notice::SSH key securely removed"
-          fi
-
-          # Remove the added known_hosts entry for github.com
-          if [ -f ~/.ssh/known_hosts ]; then
-            sed -i '/^github\.com/d' ~/.ssh/known_hosts 2>/dev/null || true
-            echo "::notice::GitHub known_hosts entry removed"
-          fi
+          flutter_version: ${{ env.FLUTTER_VERSION }}
+          flutter_chart_ref: ${{ env.FLUTTER_CHART_REF }}
+          web_renderer: ${{ env.FLUTTER_WEB_RENDERER }}
+          ssh_key: ${{ secrets.SSH_KEY }}
+          github_token: ${{ github.token }}
+          merge_commit_sha: ${{ github.event.pull_request.merge_commit_sha }}
 
   # ---------------------------------------------------------------------------
   # Node.js Build Job
@@ -252,62 +158,23 @@ jobs:
     needs: security_and_setup
     if: needs.security_and_setup.outputs.is_safe == 'true'
     runs-on: ubuntu-latest
+    outputs:
+      build_size: ${{ steps.nodejs_build.outputs.build_size }}
     steps:
-      - name: Checkout repository
+      - name: Checkout for action access
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.merge_commit_sha }}
-          fetch-depth: 0
+          sparse-checkout: |
+            .github/actions/nodejs-build
+          sparse-checkout-cone-mode: false
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Build Node.js application
+        id: nodejs_build
+        uses: ./.github/actions/nodejs-build
         with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-
-      - name: Cache node_modules
-        uses: actions/cache@v3
-        with:
-          path: node_modules
-          key: node-modules-${{ hashFiles('package-lock.json') }}
-          restore-keys: node-modules-
-
-      - name: Install dependencies with retry
-        uses: nick-fields/retry@v2
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: npm ci
-
-      - name: Build SmartCharts Champion with retry
-        uses: nick-fields/retry@v2
-        with:
-          timeout_minutes: 15
-          max_attempts: 3
-          command: |
-            set -e
-            echo "::group::Building SmartCharts Champion"
-            npm run build
-            echo "::endgroup::"
-
-            # Verify build output exists
-            if [ ! -d "dist" ]; then
-              echo "::error::SmartCharts Champion build failed - no dist directory found"
-              exit 1
-            fi
-
-      - name: Report Node.js build size
-        run: |
-          NODEJS_SIZE=$(du -sh dist | cut -f1)
-          echo "::notice::Node.js build size: $NODEJS_SIZE"
-          echo "NODEJS_BUILD_SIZE=$NODEJS_SIZE" >> $GITHUB_ENV
-
-      - name: Upload Node.js build artifacts
-        uses: actions/upload-artifact@v3
-        with:
-          name: nodejs-build
-          path: dist
-          retention-days: 1
+          node_version: ${{ env.NODE_VERSION }}
+          node_env: ${{ env.NODE_ENV }}
+          merge_commit_sha: ${{ github.event.pull_request.merge_commit_sha }}
 
   # ---------------------------------------------------------------------------
   # Integration and Deployment Job
@@ -325,255 +192,64 @@ jobs:
       checks: write
       pull-requests: write
       pages: write
+    outputs:
+      deployment_verified: ${{ steps.deploy_preview.outputs.deployment_verified }}
+      total_size: ${{ steps.deploy_preview.outputs.total_size }}
     steps:
-      - name: Checkout repository
+      - name: Checkout for action access
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.merge_commit_sha }}
-          fetch-depth: 0
+          sparse-checkout: |
+            .github/actions/deploy-preview
+          sparse-checkout-cone-mode: false
 
-      - name: Setup Node.js for deployment
-        uses: actions/setup-node@v4
+      - name: Deploy preview
+        id: deploy_preview
+        uses: ./.github/actions/deploy-preview
         with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
+          node_version: ${{ env.NODE_VERSION }}
+          merge_commit_sha: ${{ github.event.pull_request.merge_commit_sha }}
+          branch_name: ${{ needs.security_and_setup.outputs.branch_name }}
+          deploy_url: ${{ needs.security_and_setup.outputs.deploy_url }}
+          is_preview: ${{ needs.security_and_setup.outputs.is_preview }}
+          github_token: ${{ github.token }}
+          deployment_verification_attempts: ${{ env.DEPLOYMENT_VERIFICATION_ATTEMPTS }}
+          deployment_wait_time: ${{ env.DEPLOYMENT_WAIT_TIME }}
 
-      - name: Install deployment dependencies
-        run: npm ci
-
-      - name: Download Flutter build artifacts
-        uses: actions/download-artifact@v3
+  # ---------------------------------------------------------------------------
+  # Notification Job
+  # ---------------------------------------------------------------------------
+  # Purpose: Posts success/failure notifications with build statistics
+  # Dependencies: Runs after deployment regardless of success/failure
+  # Features: Comprehensive status reporting and troubleshooting information
+  # ---------------------------------------------------------------------------
+  notify:
+    needs: [security_and_setup, build_flutter, build_nodejs, deploy]
+    if: always() && needs.security_and_setup.outputs.is_safe == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout for action access
+        uses: actions/checkout@v4
         with:
-          name: flutter-build
-          path: flutter-build
+          sparse-checkout: |
+            .github/actions/preview-notifications
+          sparse-checkout-cone-mode: false
 
-      - name: Download Node.js build artifacts
-        uses: actions/download-artifact@v3
+      - name: Send notifications
+        uses: ./.github/actions/preview-notifications
         with:
-          name: nodejs-build
-          path: dist
-
-      - name: Verify build artifacts
-        run: |
-          set -e
-          echo "::group::Verifying build artifacts integrity"
-
-          # Verify Flutter build artifacts
-          if [ ! -d "flutter-build" ]; then
-            echo "::error::Flutter build artifacts directory not found"
-            exit 1
-          fi
-
-          if [ ! -f "flutter-build/index.html" ]; then
-            echo "::error::Flutter build missing index.html"
-            exit 1
-          fi
-
-          # Verify Node.js build artifacts
-          if [ ! -d "dist" ]; then
-            echo "::error::Node.js build artifacts directory not found"
-            exit 1
-          fi
-
-          # Check for essential files in dist
-          ESSENTIAL_FILES=("index.html")
-          for file in "${ESSENTIAL_FILES[@]}"; do
-            if [ ! -f "dist/$file" ]; then
-              echo "::error::Essential file missing from Node.js build: $file"
-              exit 1
-            fi
-          done
-
-          # Verify artifacts are not empty
-          FLUTTER_FILE_COUNT=$(find flutter-build -type f | wc -l)
-          NODEJS_FILE_COUNT=$(find dist -type f | wc -l)
-
-          if [ "$FLUTTER_FILE_COUNT" -eq 0 ]; then
-            echo "::error::Flutter build artifacts directory is empty"
-            exit 1
-          fi
-
-          if [ "$NODEJS_FILE_COUNT" -eq 0 ]; then
-            echo "::error::Node.js build artifacts directory is empty"
-            exit 1
-          fi
-
-          echo "::notice::✅ Build artifacts verification passed"
-          echo "::notice::  - Flutter files: $FLUTTER_FILE_COUNT"
-          echo "::notice::  - Node.js files: $NODEJS_FILE_COUNT"
-          echo "::endgroup::"
-
-      - name: Integrate Flutter build
-        run: |
-          set -e
-          echo "::group::Integrating Flutter build with main application"
-
-          # Create Flutter subdirectory in main dist folder
-          mkdir -p dist/flutter
-
-          # Copy all Flutter web build artifacts
-          cp -r flutter-build/* dist/flutter/
-
-          # Verify integration was successful
-          if [ ! -f "dist/flutter/index.html" ]; then
-            echo "::error::Failed to integrate Flutter build artifacts"
-            exit 1
-          fi
-
-          echo "::notice::Successfully integrated Flutter build"
-          echo "::endgroup::"
-
-      - name: Configure Git
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-
-      - name: Report final build statistics
-        run: |
-          TOTAL_SIZE=$(du -sh dist | cut -f1)
-          echo "::notice::Final deployment size: $TOTAL_SIZE"
-
-          # Count files for additional stats
-          FILE_COUNT=$(find dist -type f | wc -l)
-          echo "::notice::Total files in deployment: $FILE_COUNT"
-
-      - name: Deploy to GitHub Pages with retry
-        uses: nick-fields/retry@v2
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BRANCH_NAME: ${{ needs.security_and_setup.outputs.branch_name }}
-          IS_PREVIEW: ${{ needs.security_and_setup.outputs.is_preview }}
-          DEPLOY_URL: ${{ needs.security_and_setup.outputs.deploy_url }}
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: |
-            set -e
-            echo "::group::Deploying to GitHub Pages"
-            echo "::notice::Deploying to branch: $BRANCH_NAME"
-
-            if [ "$IS_PREVIEW" == "true" ]; then
-              echo "::notice::Running preview deployment to folder: $BRANCH_NAME"
-              npm run gh-pages:folder -- "$BRANCH_NAME"
-            else
-              echo "::notice::Running main deployment"
-              npm run gh-pages
-            fi
-
-            echo "::notice::Deployment completed successfully"
-            echo "::notice::Site will be available at: $DEPLOY_URL"
-            echo "::endgroup::"
-
-      - name: Wait for deployment propagation
-        if: needs.security_and_setup.outputs.is_preview == 'true'
-        run: |
-          echo "::notice::Waiting for GitHub Pages deployment to propagate..."
-          sleep ${{ env.DEPLOYMENT_WAIT_TIME }}
-
-      - name: Verify deployment
-        run: |
-          DEPLOY_URL="${{ needs.security_and_setup.outputs.deploy_url }}"
-          MAX_ATTEMPTS=${{ env.DEPLOYMENT_VERIFICATION_ATTEMPTS }}
-          ATTEMPT=1
-
-          echo "::group::Verifying deployment at $DEPLOY_URL"
-
-          while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
-            echo "::notice::Verification attempt $ATTEMPT of $MAX_ATTEMPTS"
-
-            if curl -s -f --max-time 30 "$DEPLOY_URL" > /dev/null; then
-              echo "::notice::✅ Deployment verified successfully!"
-              echo "DEPLOYMENT_VERIFIED=true" >> $GITHUB_ENV
-              break
-            fi
-
-            if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
-              echo "::warning::⚠️  Deployment verification failed after $MAX_ATTEMPTS attempts"
-              echo "::warning::The site may still be propagating. Please check manually: $DEPLOY_URL"
-              echo "DEPLOYMENT_VERIFIED=false" >> $GITHUB_ENV
-              break
-            fi
-
-            echo "::notice::Attempt $ATTEMPT failed, retrying in 10 seconds..."
-            sleep 10
-            ATTEMPT=$((ATTEMPT + 1))
-          done
-
-          echo "::endgroup::"
-
-      - name: Generate success notification
-        if: github.event_name == 'pull_request' && success()
-        uses: 'deriv-com/shared-actions/.github/actions/post_preview_link_comment@v1'
-        with:
-          issue_number: ${{ github.event.number }}
-          check_run_id: ${{ needs.security_and_setup.outputs.check_run_id }}
-          preview_url: ${{ needs.security_and_setup.outputs.deploy_url }}
-          status: ${{ job.status }}
-
-      - name: Post build statistics comment
-        if: github.event_name == 'pull_request' && success()
-        uses: actions/github-script@v7
-        continue-on-error: true
-        with:
-          github-token: ${{ github.token }}
-          script: |
-            const totalSize = process.env.TOTAL_SIZE || 'Unknown';
-            const deployUrl = '${{ needs.security_and_setup.outputs.deploy_url }}';
-            const verified = process.env.DEPLOYMENT_VERIFIED === 'true' ? '✅ Verified' : '⚠️ Pending verification';
-
-            const body = `## 📊 Build Statistics
-
-            **🚀 Deployment Status:** ${verified}
-            **📦 Total Size:** ${totalSize}
-            **🔗 Preview URL:** ${deployUrl}
-
-            The preview site has been deployed and should be accessible within a few minutes.`;
-
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.payload.pull_request.number,
-              body: body
-            });
-
-      - name: Cleanup build artifacts
-        if: always()
-        run: |
-          # Clean up large temporary files and caches
-          rm -rf node_modules/.cache
-          rm -rf dist
-          rm -rf flutter-build
-
-      - name: Report deployment failure
-        if: failure() && github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        continue-on-error: true
-        with:
-          github-token: ${{ github.token }}
-          script: |
-            const workflowUrl = `${context.payload.repository.html_url}/actions/runs/${context.runId}`;
-
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.payload.pull_request.number,
-              body: `## ❌ Preview deployment failed
-
-              The preview deployment for this PR failed during the build or deployment process.
-
-              **🔍 Troubleshooting:**
-              - Check the [workflow run](${workflowUrl}) for detailed error logs
-              - Verify that all dependencies are properly configured
-              - Ensure Flutter and Node.js builds complete successfully
-              - Check for any configuration issues in build scripts
-
-              **🔄 Next Steps:**
-              1. Review the error logs in the workflow run
-              2. Fix any identified issues
-              3. Push new changes to automatically retry the deployment
-
-              The workflow includes automatic retry mechanisms, so temporary failures should resolve automatically.`
-            });
+          github_token: ${{ github.token }}
+          pr_number: ${{ github.event.number }}
+          pr_title: ${{ github.event.pull_request.title }}
+          head_sha: ${{ github.event.pull_request.head.sha }}
+          deploy_url: ${{ needs.security_and_setup.outputs.deploy_url }}
+          deployment_verified: ${{ needs.deploy.outputs.deployment_verified || 'false' }}
+          total_size: ${{ needs.deploy.outputs.total_size }}
+          flutter_build_size: ${{ needs.build_flutter.outputs.build_size }}
+          nodejs_build_size: ${{ needs.build_nodejs.outputs.build_size }}
+          workflow_status: ${{ needs.deploy.result == 'success' && 'success' || 'failure' }}
+          workflow_run_id: ${{ github.run_id }}
+          repository_url: ${{ github.event.repository.html_url }}
 
   # ---------------------------------------------------------------------------
   # Cleanup Job
@@ -583,7 +259,7 @@ jobs:
   # Scope: Removes temporary artifacts and performs housekeeping
   # ---------------------------------------------------------------------------
   cleanup:
-    needs: [security_and_setup, build_flutter, build_nodejs, deploy]
+    needs: [security_and_setup, build_flutter, build_nodejs, deploy, notify]
     if: always() && needs.security_and_setup.outputs.is_safe == 'true'
     runs-on: ubuntu-latest
     steps:

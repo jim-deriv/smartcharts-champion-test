@@ -1,0 +1,149 @@
+# =============================================================================
+# Flutter Build Action
+# =============================================================================
+#
+# Purpose: Builds Flutter web application with caching and retry logic
+# Performance: Uses extensive caching for dependencies and build artifacts
+# Output: Stores Flutter build artifacts for integration step
+#
+# =============================================================================
+
+name: "Flutter Build"
+description: "Builds Flutter web application with caching and retry mechanisms"
+
+inputs:
+  flutter_version:
+    description: "Flutter version to use"
+    default: "3.24.1"
+    required: false
+  flutter_chart_ref:
+    description: "Flutter chart repository reference"
+    default: "master"
+    required: false
+  web_renderer:
+    description: "Flutter web renderer"
+    default: "html"
+    required: false
+  ssh_key:
+    description: "SSH key for private repository access"
+    required: true
+  github_token:
+    description: "GitHub token for repository access"
+    required: true
+  merge_commit_sha:
+    description: "Merge commit SHA to checkout"
+    required: true
+
+outputs:
+  build_size:
+    description: "Size of the Flutter build"
+    value: ${{ steps.build_stats.outputs.build_size }}
+  artifact_name:
+    description: "Name of the uploaded artifact"
+    value: "flutter-build"
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs.merge_commit_sha }}
+        fetch-depth: 0
+
+    - name: Checkout flutter-chart
+      uses: actions/checkout@v4
+      with:
+        repository: 'deriv-com/flutter-chart'
+        path: flutter-chart
+        ref: ${{ inputs.flutter_chart_ref }}
+        token: ${{ inputs.github_token }}
+
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: ${{ inputs.flutter_version }}
+        channel: 'stable'
+        cache: true
+
+    - name: Cache Flutter dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.pub-cache
+          chart_app/.dart_tool
+        key: flutter-deps-${{ inputs.flutter_version }}-${{ hashFiles('**/pubspec.lock') }}
+        restore-keys: |
+          flutter-deps-${{ inputs.flutter_version }}-
+          flutter-deps-
+
+    - name: Cache Flutter build
+      uses: actions/cache@v3
+      with:
+        path: chart_app/build
+        key: flutter-build-${{ hashFiles('chart_app/**/*.dart', 'chart_app/pubspec.yaml') }}
+        restore-keys: flutter-build-
+
+    - name: Setup SSH key
+      shell: bash
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ inputs.ssh_key }}" > ~/.ssh/github_action_key
+        chmod 600 ~/.ssh/github_action_key
+        ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+    - name: Build Flutter application with retry
+      uses: nick-fields/retry@v2
+      env:
+        GIT_SSH_COMMAND: 'ssh -i ~/.ssh/github_action_key -o StrictHostKeyChecking=no'
+      with:
+        timeout_minutes: 10
+        max_attempts: 3
+        command: |
+          set -e
+          cd chart_app
+
+          echo "::group::Installing Flutter dependencies"
+          flutter pub get
+          echo "::endgroup::"
+
+          echo "::group::Building Flutter web application"
+          flutter build web --web-renderer ${{ inputs.web_renderer }} --release --verbose
+          echo "::endgroup::"
+
+          # Verify build output exists
+          if [ ! -d "build/web" ]; then
+            echo "::error::Flutter build failed - no build/web directory found"
+            exit 1
+          fi
+
+    - name: Report Flutter build size
+      id: build_stats
+      shell: bash
+      run: |
+        FLUTTER_SIZE=$(du -sh chart_app/build/web | cut -f1)
+        echo "::notice::Flutter build size: $FLUTTER_SIZE"
+        echo "build_size=$FLUTTER_SIZE" >> $GITHUB_OUTPUT
+
+    - name: Upload Flutter build artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: flutter-build
+        path: chart_app/build/web
+        retention-days: 1
+
+    - name: Cleanup SSH key
+      if: always()
+      shell: bash
+      run: |
+        # Secure cleanup of SSH key and known_hosts
+        if [ -f ~/.ssh/github_action_key ]; then
+          shred -vfz -n 3 ~/.ssh/github_action_key 2>/dev/null || rm -f ~/.ssh/github_action_key
+          echo "::notice::SSH key securely removed"
+        fi
+
+        # Remove the added known_hosts entry for github.com
+        if [ -f ~/.ssh/known_hosts ]; then
+          sed -i '/^github\.com/d' ~/.ssh/known_hosts 2>/dev/null || true
+          echo "::notice::GitHub known_hosts entry removed"
+        fi

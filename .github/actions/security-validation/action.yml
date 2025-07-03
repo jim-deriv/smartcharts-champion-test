@@ -1,0 +1,94 @@
+# =============================================================================
+# Security Validation Action
+# =============================================================================
+#
+# Purpose: Validates PR source, inputs, and sets up deployment parameters
+# Security: Prevents malicious code execution and validates all inputs
+# Output: Provides safety flags and deployment configuration for workflows
+#
+# =============================================================================
+
+name: "Security Validation"
+description: "Validates PR source and sets deployment parameters"
+
+inputs:
+  pr_number:
+    description: "Pull request number"
+    required: true
+  event_name:
+    description: "GitHub event name"
+    required: true
+  head_repo_full_name:
+    description: "Head repository full name"
+    required: true
+  base_repo_full_name:
+    description: "Base repository full name"
+    required: true
+  repository_owner:
+    description: "Repository owner"
+    required: true
+  github_pages_branch:
+    description: "GitHub Pages branch name"
+    default: "gh-pages"
+    required: false
+
+outputs:
+  is_safe:
+    description: "Whether the PR is safe to build (true/false)"
+    value: ${{ steps.security_check.outputs.is_safe }}
+  branch_name:
+    description: "Deployment branch name"
+    value: ${{ steps.deploy_params.outputs.branch_name }}
+  deploy_url:
+    description: "Deployment URL"
+    value: ${{ steps.deploy_params.outputs.deploy_url }}
+  is_preview:
+    description: "Whether this is a preview deployment (true/false)"
+    value: ${{ steps.deploy_params.outputs.is_preview }}
+  build_base_path:
+    description: "Build base path for deployment"
+    value: ${{ steps.deploy_params.outputs.build_base_path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Security and input validation
+      id: security_check
+      shell: bash
+      run: |
+        # Validate PR number is numeric
+        if ! [[ "${{ inputs.pr_number }}" =~ ^[0-9]+$ ]]; then
+          echo "::error::Invalid PR number format"
+          echo "is_safe=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+
+        # Compare the source repository with the target repository
+        if [ "${{ inputs.head_repo_full_name }}" != "${{ inputs.base_repo_full_name }}" ]; then
+          echo "::warning::PR is from a fork. Manual approval required for security."
+          echo "is_safe=false" >> $GITHUB_OUTPUT
+        else
+          echo "::notice::PR is from the same repository. Safe to proceed."
+          echo "is_safe=true" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Set deployment parameters
+      id: deploy_params
+      shell: bash
+      run: |
+        if [ "${{ inputs.event_name }}" == "pull_request" ]; then
+          # PR preview deployment configuration
+          BRANCH_NAME="pr-${{ inputs.pr_number }}"
+          DEPLOY_URL="https://${{ inputs.repository_owner }}.github.io/smartcharts-champion/${BRANCH_NAME}"
+          BUILD_BASE_PATH="/smartcharts-champion/${BRANCH_NAME}"
+          echo "branch_name=${BRANCH_NAME}" >> $GITHUB_OUTPUT
+          echo "deploy_url=${DEPLOY_URL}" >> $GITHUB_OUTPUT
+          echo "build_base_path=${BUILD_BASE_PATH}" >> $GITHUB_OUTPUT
+          echo "is_preview=true" >> $GITHUB_OUTPUT
+        else
+          # Main branch deployment configuration
+          echo "branch_name=${{ inputs.github_pages_branch }}" >> $GITHUB_OUTPUT
+          echo "deploy_url=https://${{ inputs.repository_owner }}.github.io/smartcharts-champion" >> $GITHUB_OUTPUT
+          echo "build_base_path=/smartcharts-champion" >> $GITHUB_OUTPUT
+          echo "is_preview=false" >> $GITHUB_OUTPUT
+        fi

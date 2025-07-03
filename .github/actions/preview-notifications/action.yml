@@ -1,0 +1,131 @@
+# =============================================================================
+# Preview Notifications Action
+# =============================================================================
+#
+# Purpose: Posts preview deployment notifications and build statistics
+# Features: Success/failure notifications, build statistics, status updates
+# Reusable: Can be used across different workflows for consistent messaging
+#
+# =============================================================================
+
+name: "Preview Notifications"
+description: "Posts preview deployment notifications and build statistics"
+
+inputs:
+  github_token:
+    description: "GitHub token for posting comments"
+    required: true
+  pr_number:
+    description: "Pull request number"
+    required: true
+  pr_title:
+    description: "Pull request title"
+    required: true
+  head_sha:
+    description: "Head commit SHA"
+    required: true
+  deploy_url:
+    description: "Deployment URL"
+    required: true
+  deployment_verified:
+    description: "Whether deployment was verified"
+    required: true
+  total_size:
+    description: "Total deployment size"
+    required: false
+  flutter_build_size:
+    description: "Flutter build size"
+    required: false
+  nodejs_build_size:
+    description: "Node.js build size"
+    required: false
+  workflow_status:
+    description: "Overall workflow status (success/failure)"
+    required: true
+  workflow_run_id:
+    description: "GitHub workflow run ID"
+    required: true
+  repository_url:
+    description: "Repository URL"
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Post initial build status
+      if: inputs.workflow_status == 'started'
+      uses: 'deriv-com/shared-actions/.github/actions/post_preview_build_comment@v1'
+      with:
+        issue_number: ${{ inputs.pr_number }}
+        head_sha: ${{ inputs.head_sha }}
+
+    - name: Generate success notification
+      if: inputs.workflow_status == 'success'
+      uses: 'deriv-com/shared-actions/.github/actions/post_preview_link_comment@v1'
+      with:
+        issue_number: ${{ inputs.pr_number }}
+        preview_url: ${{ inputs.deploy_url }}
+        status: ${{ inputs.workflow_status }}
+
+    - name: Post build statistics comment
+      if: inputs.workflow_status == 'success'
+      uses: actions/github-script@v7
+      continue-on-error: true
+      with:
+        github-token: ${{ inputs.github_token }}
+        script: |
+          const totalSize = '${{ inputs.total_size }}' || 'Unknown';
+          const flutterSize = '${{ inputs.flutter_build_size }}' || 'Unknown';
+          const nodejsSize = '${{ inputs.nodejs_build_size }}' || 'Unknown';
+          const deployUrl = '${{ inputs.deploy_url }}';
+          const verified = '${{ inputs.deployment_verified }}' === 'true' ? '✅ Verified' : '⚠️ Pending verification';
+
+          const body = `## 📊 Build Statistics
+
+          **🚀 Deployment Status:** ${verified}
+          **📦 Total Size:** ${totalSize}
+          **🔗 Preview URL:** ${deployUrl}
+
+          **Build Breakdown:**
+          - **Flutter Build:** ${flutterSize}
+          - **Node.js Build:** ${nodejsSize}
+
+          The preview site has been deployed and should be accessible within a few minutes.`;
+
+          await github.rest.issues.createComment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: ${{ inputs.pr_number }},
+            body: body
+          });
+
+    - name: Report deployment failure
+      if: inputs.workflow_status == 'failure'
+      uses: actions/github-script@v7
+      continue-on-error: true
+      with:
+        github-token: ${{ inputs.github_token }}
+        script: |
+          const workflowUrl = `${{ inputs.repository_url }}/actions/runs/${{ inputs.workflow_run_id }}`;
+
+          await github.rest.issues.createComment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: ${{ inputs.pr_number }},
+            body: `## ❌ Preview deployment failed
+
+            The preview deployment for this PR failed during the build or deployment process.
+
+            **🔍 Troubleshooting:**
+            - Check the [workflow run](${workflowUrl}) for detailed error logs
+            - Verify that all dependencies are properly configured
+            - Ensure Flutter and Node.js builds complete successfully
+            - Check for any configuration issues in build scripts
+
+            **🔄 Next Steps:**
+            1. Review the error logs in the workflow run
+            2. Fix any identified issues
+            3. Push new changes to automatically retry the deployment
+
+            The workflow includes automatic retry mechanisms, so temporary failures should resolve automatically.`
+          });
