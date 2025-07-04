@@ -65,6 +65,7 @@ runs:
       with:
         timeout_minutes: 10
         max_attempts: 3
+        shell: bash
         command: |
           echo "::group::NPM and Node.js version information"
           node --version
@@ -93,6 +94,7 @@ runs:
       with:
         timeout_minutes: 15
         max_attempts: 3
+        shell: bash
         command: |
           set -e
           echo "::group::Building SmartCharts Champion"

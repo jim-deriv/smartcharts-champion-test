@@ -112,6 +112,7 @@ runs:
       with:
         timeout_minutes: 10
         max_attempts: 3
+        shell: bash
         command: |
           set -e
           cd chart_app

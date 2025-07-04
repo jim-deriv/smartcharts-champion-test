@@ -76,6 +76,17 @@ runs:
         ls -la
         echo "Package files:"
         ls -la package* || echo "No package files found"
+        echo "::endgroup::"
+
+    - name: Download Flutter build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: flutter-build
+        path: flutter-build
+
+    - name: Download Node.js build artifacts
+      uses: actions/download-artifact@v4
+      with:
         name: nodejs-build
         path: dist
 
@@ -179,6 +190,7 @@ runs:
       with:
         timeout_minutes: 10
         max_attempts: 3
+        shell: bash
         command: |
           set -e
           echo "::group::Deploying to GitHub Pages"
