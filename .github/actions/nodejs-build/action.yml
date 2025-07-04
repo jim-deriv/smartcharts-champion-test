@@ -45,7 +45,7 @@ runs:
       uses: actions/setup-node@v4
       with:
         node-version: ${{ inputs.node_version }}
-        cache: 'npm'
+        cache: "npm"
 
     - name: Cache node_modules
       uses: actions/cache@v3
@@ -89,7 +89,7 @@ runs:
         echo "build_size=$NODEJS_SIZE" >> $GITHUB_OUTPUT
 
     - name: Upload Node.js build artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: nodejs-build
         path: dist

@@ -61,20 +61,20 @@ runs:
       uses: actions/setup-node@v4
       with:
         node-version: ${{ inputs.node_version }}
-        cache: 'npm'
+        cache: "npm"
 
     - name: Install deployment dependencies
       shell: bash
       run: npm ci
 
     - name: Download Flutter build artifacts
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: flutter-build
         path: flutter-build
 
     - name: Download Node.js build artifacts
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: nodejs-build
         path: dist
