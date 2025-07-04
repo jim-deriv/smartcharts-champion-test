@@ -95,6 +95,17 @@ runs:
         command: |
           set -e
           echo "::group::Building SmartCharts Champion"
+          
+          # Check if rimraf is available
+          echo "Checking for rimraf..."
+          if [ -f "node_modules/.bin/rimraf" ]; then
+            echo "rimraf found in node_modules/.bin/"
+          else
+            echo "rimraf not found, checking node_modules..."
+            ls -la node_modules/.bin/ | grep rimraf || echo "rimraf not in .bin directory"
+          fi
+          
+          # Run the build
           npm run build
           echo "::endgroup::"
 
