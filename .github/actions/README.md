@@ -40,7 +40,7 @@ This directory contains reusable GitHub Actions for the SmartCharts Champion pro
 **Purpose**: Builds SmartCharts Champion application with caching and retry logic
 
 **Inputs**:
-- `node_version`: Node.js version (default: "18.17.0")
+- `node_version`: Node.js version (default: "18.x")
 - `node_env`: Node environment (default: "production")
 - `merge_commit_sha`: Merge commit SHA to checkout
 
@@ -52,7 +52,7 @@ This directory contains reusable GitHub Actions for the SmartCharts Champion pro
 **Purpose**: Integrates builds and deploys to GitHub Pages with verification
 
 **Inputs**:
-- `node_version`: Node.js version (default: "18.17.0")
+- `node_version`: Node.js version (default: "18.x")
 - `merge_commit_sha`: Merge commit SHA to checkout
 - `branch_name`: Deployment branch name
 - `deploy_url`: Deployment URL
@@ -111,7 +111,7 @@ These actions are used in the main PR preview workflow (`pr-preview-pages.yml`) 
 
 ## Dependencies
 
-- **Node.js**: Version 18.17.0 with npm caching
+- **Node.js**: Version 18.x with npm caching
 - **Flutter**: Version 3.24.1 with stable channel
 - **SSH Key**: Configured in repository secrets for private repository access
 - **GitHub Token**: With appropriate permissions for deployment and comments

@@ -43,7 +43,7 @@ ls -la chart_app/build/web/
 | Issue | Enhanced Solution |
 |-------|-------------------|
 | Flutter build fails | **Auto-retry**: 3 attempts with caching. Check Flutter 3.24.1, clear cache, verify SSH_KEY |
-| Node.js build fails | **Auto-retry**: 3 attempts with npm caching. Verify Node.js 18.17.0, run `npm ci --cache .npm` |
+| Node.js build fails | **Auto-retry**: 3 attempts with npm caching. Verify Node.js 18.x, run `npm ci --cache .npm` |
 | SSH key errors | **Auto-cleanup**: Secure key handling. Ensure SSH_KEY is PEM format, check permissions |
 | Deployment fails | **Retry logic**: 3 attempts with backoff. Check Pages settings, branch protection, permissions |
 | Parallel build conflicts | **Resource management**: Jobs run in isolation. Check runner capacity and artifact conflicts |

@@ -60,7 +60,7 @@ The GitHub Actions setup provides:
 #### Environment Variables
 ```yaml
 FLUTTER_VERSION: '3.24.1'
-NODE_VERSION: '18.17.0'
+NODE_VERSION: '18.x'
 FLUTTER_CHART_REF: 'master'
 FLUTTER_WEB_RENDERER: 'html'
 NODE_ENV: 'production'
@@ -204,7 +204,7 @@ permissions:
 ## 📦 Dependencies
 
 ### Runtime Dependencies
-- **Node.js**: 18.17.0 with comprehensive npm caching and retry mechanisms
+- **Node.js**: 18.x with comprehensive npm caching and retry mechanisms
 - **Flutter**: 3.24.1 with stable channel and multi-layer caching
 - **Git**: Enhanced repository operations with retry logic and optimizations
 

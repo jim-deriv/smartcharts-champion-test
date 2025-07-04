@@ -14,7 +14,7 @@ description: "Integrates builds and deploys to GitHub Pages with verification"
 inputs:
   node_version:
     description: "Node.js version to use"
-    default: "18.17.0"
+    default: "18.x"
     required: false
   merge_commit_sha:
     description: "Merge commit SHA to checkout"
@@ -76,17 +76,6 @@ runs:
         ls -la
         echo "Package files:"
         ls -la package* || echo "No package files found"
-        echo "::endgroup::"
-
-    - name: Download Flutter build artifacts
-      uses: actions/download-artifact@v4
-      with:
-        name: flutter-build
-        path: flutter-build
-
-    - name: Download Node.js build artifacts
-      uses: actions/download-artifact@v4
-      with:
         name: nodejs-build
         path: dist
 
