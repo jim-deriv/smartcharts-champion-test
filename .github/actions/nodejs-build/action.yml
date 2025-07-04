@@ -14,7 +14,7 @@ description: "Builds SmartCharts Champion application with caching and retry mec
 inputs:
   node_version:
     description: "Node.js version to use"
-    default: "18.x"
+    default: "18.17.0"
     required: false
   node_env:
     description: "Node environment"
@@ -89,6 +89,7 @@ runs:
       uses: nick-fields/retry@v3
       env:
         NODE_ENV: ${{ inputs.node_env }}
+        PATH: ${{ github.workspace }}/node_modules/.bin:${{ env.PATH }}
       with:
         timeout_minutes: 15
         max_attempts: 3
@@ -98,15 +99,20 @@ runs:
           
           # Check if rimraf is available
           echo "Checking for rimraf..."
-          if [ -f "node_modules/.bin/rimraf" ]; then
-            echo "rimraf found in node_modules/.bin/"
-          else
-            echo "rimraf not found, checking node_modules..."
-            ls -la node_modules/.bin/ | grep rimraf || echo "rimraf not in .bin directory"
-          fi
+          echo "PATH: $PATH"
+          echo "Checking node_modules/.bin directory:"
+          ls -la node_modules/.bin/ | head -10
           
-          # Run the build
-          npm run build
+          # Try to find rimraf
+          which rimraf || echo "rimraf not found in PATH"
+          npx rimraf --version || echo "rimraf not available via npx"
+          
+          # Clean dist directory manually if rimraf fails, then run webpack
+          echo "Cleaning dist directory..."
+          rm -rf dist
+          
+          echo "Running webpack build..."
+          npx cross-env NODE_ENV=production webpack --mode=production --progress
           echo "::endgroup::"
 
           # Verify build output exists
