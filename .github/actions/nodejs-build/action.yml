@@ -121,7 +121,6 @@ runs:
       env:
         NODE_ENV: ${{ inputs.node_env }}
         PATH: ${{ github.workspace }}/node_modules/.bin:${{ env.PATH }}
-        HUSKY: 0
       run: |
         set -e
         
@@ -181,9 +180,8 @@ runs:
           
           echo "Attempting build with different methods..."
           
-          # Method 1: Try npm run build (disable husky in CI)
-          echo "Method 1: npm run build with CI environment"
-          export HUSKY=0  # Disable husky in CI environment
+          # Method 1: Try npm run build
+          echo "Method 1: npm run build"
           if npm run build; then
             echo "npm run build succeeded"
             BUILD_SUCCESS=true

@@ -43,7 +43,7 @@
         "translations:download": "crowdin download -b master",
         "prettify": "./node_modules/.bin/prettier --config ./.prettierrc --write \"./{app,loaders,src}/**/*.{js,jsx,scss}\"",
         "precommit": "lint-staged --allow-empty",
-        "prepare": "husky install"
+        "prepare": "is-ci || husky install"
     },
     "devDependencies": {
         "@babel/cli": "^7.5.5",
@@ -109,6 +109,7 @@
         "gh-pages": "^5.0.0",
         "husky": "^7.0.4",
         "inquirer": "^9.2.19",
+        "is-ci": "^3.0.1",
         "json-loader": "^0.5.7",
         "lint-staged": "^10.4.0",
         "md5-file": "^4.0.0",
