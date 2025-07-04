@@ -162,12 +162,11 @@ jobs:
         outputs:
             build_size: ${{ steps.nodejs_build.outputs.build_size }}
         steps:
-            - name: Checkout for action access
+            - name: Checkout repository
               uses: actions/checkout@v4
               with:
-                  sparse-checkout: |
-                      .github/actions/nodejs-build
-                  sparse-checkout-cone-mode: false
+                  ref: ${{ github.event.pull_request.merge_commit_sha }}
+                  fetch-depth: 0
 
             - name: Download Flutter build artifacts
               uses: actions/download-artifact@v4
@@ -181,7 +180,6 @@ jobs:
               with:
                   node_version: ${{ env.NODE_VERSION }}
                   node_env: ${{ env.NODE_ENV }}
-                  merge_commit_sha: ${{ github.event.pull_request.merge_commit_sha }}
 
     # ---------------------------------------------------------------------------
     # Integration and Deployment Job

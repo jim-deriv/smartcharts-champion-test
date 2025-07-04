@@ -20,9 +20,6 @@ inputs:
     description: "Node environment"
     default: "production"
     required: false
-  merge_commit_sha:
-    description: "Merge commit SHA to checkout"
-    required: true
 
 outputs:
   build_size:
@@ -35,12 +32,6 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        ref: ${{ inputs.merge_commit_sha }}
-        fetch-depth: 1
-
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
