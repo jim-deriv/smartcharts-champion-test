@@ -133,12 +133,11 @@ jobs:
         outputs:
             build_size: ${{ steps.flutter_build.outputs.build_size }}
         steps:
-            - name: Checkout for action access
+            - name: Checkout repository
               uses: actions/checkout@v4
               with:
-                  sparse-checkout: |
-                      .github/actions/flutter-build
-                  sparse-checkout-cone-mode: false
+                  ref: ${{ github.event.pull_request.merge_commit_sha }}
+                  fetch-depth: 0
 
             - name: Build Flutter application
               id: flutter_build
@@ -147,29 +146,34 @@ jobs:
                   flutter_version: ${{ env.FLUTTER_VERSION }}
                   flutter_chart_ref: ${{ env.FLUTTER_CHART_REF }}
                   web_renderer: ${{ env.FLUTTER_WEB_RENDERER }}
-                  ssh_key: ${{ secrets.SSH_KEY }}
                   github_token: ${{ github.token }}
-                  merge_commit_sha: ${{ github.event.pull_request.merge_commit_sha }}
 
     # ---------------------------------------------------------------------------
     # Node.js Build Job
     # ---------------------------------------------------------------------------
-    # Purpose: Builds SmartCharts Champion application in parallel with Flutter
+    # Purpose: Builds SmartCharts Champion application after Flutter build completes
     # Performance: Uses npm caching and build artifact caching
     # Output: Stores Node.js build artifacts for integration step
     # ---------------------------------------------------------------------------
     build_nodejs:
-        needs: security_and_setup
+        needs: [security_and_setup, build_flutter]
         if: needs.security_and_setup.outputs.is_safe == 'true'
         runs-on: ubuntu-latest
         outputs:
             build_size: ${{ steps.nodejs_build.outputs.build_size }}
         steps:
-            - name: Checkout repository
+            - name: Checkout for action access
               uses: actions/checkout@v4
               with:
-                  ref: ${{ github.event.pull_request.merge_commit_sha }}
-                  fetch-depth: 0
+                  sparse-checkout: |
+                      .github/actions/nodejs-build
+                  sparse-checkout-cone-mode: false
+
+            - name: Download Flutter build artifacts
+              uses: actions/download-artifact@v4
+              with:
+                  name: flutter-build
+                  path: chart_app/build/web
 
             - name: Build Node.js application
               id: nodejs_build

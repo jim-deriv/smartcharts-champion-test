@@ -24,14 +24,8 @@ inputs:
     description: "Flutter web renderer"
     default: "html"
     required: false
-  ssh_key:
-    description: "SSH key for private repository access"
-    required: true
   github_token:
     description: "GitHub token for repository access"
-    required: true
-  merge_commit_sha:
-    description: "Merge commit SHA to checkout"
     required: true
 
 outputs:
@@ -45,12 +39,6 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        ref: ${{ inputs.merge_commit_sha }}
-        fetch-depth: 0
-
     - name: Checkout flutter-chart
       uses: actions/checkout@v4
       with:
@@ -97,18 +85,8 @@ runs:
         key: flutter-build-${{ hashFiles('chart_app/**/*.dart', 'chart_app/pubspec.yaml') }}
         restore-keys: flutter-build-
 
-    - name: Setup SSH key
-      shell: bash
-      run: |
-        mkdir -p ~/.ssh
-        echo "${{ inputs.ssh_key }}" > ~/.ssh/github_action_key
-        chmod 600 ~/.ssh/github_action_key
-        ssh-keyscan github.com >> ~/.ssh/known_hosts
-
     - name: Build Flutter application with retry
       uses: nick-fields/retry@v3
-      env:
-        GIT_SSH_COMMAND: "ssh -i ~/.ssh/github_action_key -o StrictHostKeyChecking=no"
       with:
         timeout_minutes: 10
         max_attempts: 3
@@ -145,19 +123,3 @@ runs:
         name: flutter-build
         path: chart_app/build/web
         retention-days: 1
-
-    - name: Cleanup SSH key
-      if: always()
-      shell: bash
-      run: |
-        # Secure cleanup of SSH key and known_hosts
-        if [ -f ~/.ssh/github_action_key ]; then
-          shred -vfz -n 3 ~/.ssh/github_action_key 2>/dev/null || rm -f ~/.ssh/github_action_key
-          echo "::notice::SSH key securely removed"
-        fi
-
-        # Remove the added known_hosts entry for github.com
-        if [ -f ~/.ssh/known_hosts ]; then
-          sed -i '/^github\.com/d' ~/.ssh/known_hosts 2>/dev/null || true
-          echo "::notice::GitHub known_hosts entry removed"
-        fi

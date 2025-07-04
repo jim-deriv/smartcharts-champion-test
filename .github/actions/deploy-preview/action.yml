@@ -78,12 +78,6 @@ runs:
         ls -la package* || echo "No package files found"
         echo "::endgroup::"
 
-    - name: Download Flutter build artifacts
-      uses: actions/download-artifact@v4
-      with:
-        name: flutter-build
-        path: flutter-build
-
     - name: Download Node.js build artifacts
       uses: actions/download-artifact@v4
       with:
@@ -96,25 +90,14 @@ runs:
         set -e
         echo "::group::Verifying build artifacts integrity"
 
-        # Verify Flutter build artifacts
-        if [ ! -d "flutter-build" ]; then
-          echo "::error::Flutter build artifacts directory not found"
-          exit 1
-        fi
-
-        if [ ! -f "flutter-build/index.html" ]; then
-          echo "::error::Flutter build missing index.html"
-          exit 1
-        fi
-
-        # Verify Node.js build artifacts
+        # Verify Node.js build artifacts (which includes integrated Flutter files)
         if [ ! -d "dist" ]; then
           echo "::error::Node.js build artifacts directory not found"
           exit 1
         fi
 
         # Check for essential files in dist
-        ESSENTIAL_FILES=("index.html")
+        ESSENTIAL_FILES=("smartcharts.js" "smartcharts.css")
         for file in "${ESSENTIAL_FILES[@]}"; do
           if [ ! -f "dist/$file" ]; then
             echo "::error::Essential file missing from Node.js build: $file"
@@ -122,44 +105,34 @@ runs:
           fi
         done
 
-        # Verify artifacts are not empty
-        FLUTTER_FILE_COUNT=$(find flutter-build -type f | wc -l)
-        NODEJS_FILE_COUNT=$(find dist -type f | wc -l)
-
-        if [ "$FLUTTER_FILE_COUNT" -eq 0 ]; then
-          echo "::error::Flutter build artifacts directory is empty"
+        # Verify Flutter integration in chart directory
+        if [ ! -d "dist/chart" ]; then
+          echo "::error::Flutter chart directory not found in Node.js build"
           exit 1
         fi
+
+        if [ ! -f "dist/chart/index.html" ]; then
+          echo "::error::Flutter chart index.html not found in Node.js build"
+          exit 1
+        fi
+
+        # Verify artifacts are not empty
+        NODEJS_FILE_COUNT=$(find dist -type f | wc -l)
+        FLUTTER_FILE_COUNT=$(find dist/chart -type f | wc -l)
 
         if [ "$NODEJS_FILE_COUNT" -eq 0 ]; then
           echo "::error::Node.js build artifacts directory is empty"
           exit 1
         fi
 
-        echo "::notice::✅ Build artifacts verification passed"
-        echo "::notice::  - Flutter files: $FLUTTER_FILE_COUNT"
-        echo "::notice::  - Node.js files: $NODEJS_FILE_COUNT"
-        echo "::endgroup::"
-
-    - name: Integrate Flutter build
-      shell: bash
-      run: |
-        set -e
-        echo "::group::Integrating Flutter build with main application"
-
-        # Create Flutter subdirectory in main dist folder
-        mkdir -p dist/flutter
-
-        # Copy all Flutter web build artifacts
-        cp -r flutter-build/* dist/flutter/
-
-        # Verify integration was successful
-        if [ ! -f "dist/flutter/index.html" ]; then
-          echo "::error::Failed to integrate Flutter build artifacts"
+        if [ "$FLUTTER_FILE_COUNT" -eq 0 ]; then
+          echo "::error::Flutter chart directory is empty"
           exit 1
         fi
 
-        echo "::notice::Successfully integrated Flutter build"
+        echo "::notice::✅ Build artifacts verification passed"
+        echo "::notice::  - Total files: $NODEJS_FILE_COUNT"
+        echo "::notice::  - Flutter chart files: $FLUTTER_FILE_COUNT"
         echo "::endgroup::"
 
     - name: Configure Git
