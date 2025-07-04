@@ -1,0 +1,96 @@
+# =============================================================================
+# Node.js Build Action
+# =============================================================================
+#
+# Purpose: Builds SmartCharts Champion application with caching and retry logic
+# Performance: Uses npm caching and build artifact caching
+# Output: Stores Node.js build artifacts for integration step
+#
+# =============================================================================
+
+name: "Node.js Build"
+description: "Builds SmartCharts Champion application with caching and retry mechanisms"
+
+inputs:
+  node_version:
+    description: "Node.js version to use"
+    default: "18.x"
+    required: false
+  node_env:
+    description: "Node environment"
+    default: "production"
+    required: false
+  merge_commit_sha:
+    description: "Merge commit SHA to checkout"
+    required: true
+
+outputs:
+  build_size:
+    description: "Size of the Node.js build"
+    value: ${{ steps.build_stats.outputs.build_size }}
+  artifact_name:
+    description: "Name of the uploaded artifact"
+    value: "nodejs-build"
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs.merge_commit_sha }}
+        fetch-depth: 0
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node_version }}
+        cache: 'npm'
+
+    - name: Cache node_modules
+      uses: actions/cache@v3
+      with:
+        path: node_modules
+        key: node-modules-${{ hashFiles('package-lock.json') }}
+        restore-keys: node-modules-
+
+    - name: Install dependencies with retry
+      uses: nick-fields/retry@v2
+      with:
+        timeout_minutes: 10
+        max_attempts: 3
+        command: npm ci
+
+    - name: Build SmartCharts Champion with retry
+      uses: nick-fields/retry@v2
+      env:
+        NODE_ENV: ${{ inputs.node_env }}
+      with:
+        timeout_minutes: 15
+        max_attempts: 3
+        command: |
+          set -e
+          echo "::group::Building SmartCharts Champion"
+          npm run build
+          echo "::endgroup::"
+
+          # Verify build output exists
+          if [ ! -d "dist" ]; then
+            echo "::error::SmartCharts Champion build failed - no dist directory found"
+            exit 1
+          fi
+
+    - name: Report Node.js build size
+      id: build_stats
+      shell: bash
+      run: |
+        NODEJS_SIZE=$(du -sh dist | cut -f1)
+        echo "::notice::Node.js build size: $NODEJS_SIZE"
+        echo "build_size=$NODEJS_SIZE" >> $GITHUB_OUTPUT
+
+    - name: Upload Node.js build artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: nodejs-build
+        path: dist
+        retention-days: 1
