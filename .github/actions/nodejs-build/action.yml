@@ -97,22 +97,50 @@ runs:
           set -e
           echo "::group::Building SmartCharts Champion"
           
-          # Check if rimraf is available
-          echo "Checking for rimraf..."
+          # Detailed environment debugging
+          echo "=== Environment Debug ==="
+          echo "Current directory: $(pwd)"
+          echo "GITHUB_WORKSPACE: $GITHUB_WORKSPACE"
           echo "PATH: $PATH"
-          echo "Checking node_modules/.bin directory:"
-          ls -la node_modules/.bin/ | head -10
+          echo "NODE_ENV: $NODE_ENV"
           
-          # Try to find rimraf
-          which rimraf || echo "rimraf not found in PATH"
-          npx rimraf --version || echo "rimraf not available via npx"
+          echo "=== Directory Contents ==="
+          echo "Current directory contents:"
+          ls -la
           
-          # Clean dist directory manually if rimraf fails, then run webpack
+          echo "=== Node Modules Check ==="
+          if [ -d "node_modules" ]; then
+            echo "node_modules directory exists"
+            echo "node_modules/.bin contents:"
+            ls -la node_modules/.bin/ | head -20
+            echo "Looking for rimraf specifically:"
+            find node_modules -name "rimraf*" -type f 2>/dev/null || echo "No rimraf files found"
+          else
+            echo "ERROR: node_modules directory does not exist!"
+            exit 1
+          fi
+          
+          echo "=== Package.json Check ==="
+          if [ -f "package.json" ]; then
+            echo "package.json exists"
+            echo "Build script from package.json:"
+            grep -A1 -B1 '"build"' package.json || echo "No build script found"
+          else
+            echo "ERROR: package.json not found!"
+            exit 1
+          fi
+          
+          # Try different approaches to run the build
+          echo "=== Build Attempt ==="
           echo "Cleaning dist directory..."
           rm -rf dist
           
-          echo "Running webpack build..."
-          npx cross-env NODE_ENV=production webpack --mode=production --progress
+          echo "Attempting build with different methods..."
+          
+          # Method 1: Try npm run build
+          echo "Method 1: npm run build"
+          npm run build && echo "npm run build succeeded" || echo "npm run build failed"
+          
           echo "::endgroup::"
 
           # Verify build output exists
