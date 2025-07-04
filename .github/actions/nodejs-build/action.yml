@@ -45,7 +45,6 @@ runs:
       uses: actions/setup-node@v4
       with:
         node-version: ${{ inputs.node_version }}
-        cache: "npm"
 
     - name: Cache node_modules
       uses: actions/cache@v3
