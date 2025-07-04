@@ -146,7 +146,6 @@ jobs:
                   flutter_version: ${{ env.FLUTTER_VERSION }}
                   flutter_chart_ref: ${{ env.FLUTTER_CHART_REF }}
                   web_renderer: ${{ env.FLUTTER_WEB_RENDERER }}
-                  ssh_key: ${{ secrets.SSH_KEY }}
                   github_token: ${{ github.token }}
 
     # ---------------------------------------------------------------------------
