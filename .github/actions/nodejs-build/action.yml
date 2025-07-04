@@ -81,6 +81,9 @@ runs:
           if [ $ATTEMPT -gt 1 ]; then
             echo "::notice::Waiting 30 seconds before retry..."
             sleep 30
+            # Clean npm cache and node_modules on retry
+            npm cache clean --force || true
+            rm -rf node_modules || true
           fi
           
           echo "::group::Installing dependencies (Attempt $ATTEMPT)"
@@ -101,8 +104,13 @@ runs:
           echo "::endgroup::"
           
           echo "::group::Running npm ci"
-          if npm ci --verbose; then
-            echo "::notice::✅ Dependencies installed successfully on attempt $ATTEMPT"
+          # Try npm ci first, fallback to npm install if it fails
+          if npm ci --verbose --no-audit --no-fund; then
+            echo "::notice::✅ Dependencies installed successfully with npm ci on attempt $ATTEMPT"
+            echo "::endgroup::"
+            break
+          elif npm install --verbose --no-audit --no-fund; then
+            echo "::notice::✅ Dependencies installed successfully with npm install on attempt $ATTEMPT"
             echo "::endgroup::"
             break
           else

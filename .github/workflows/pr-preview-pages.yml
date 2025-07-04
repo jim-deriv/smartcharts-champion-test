@@ -154,12 +154,12 @@ jobs:
     # ---------------------------------------------------------------------------
     # Node.js Build Job
     # ---------------------------------------------------------------------------
-    # Purpose: Builds SmartCharts Champion application in parallel with Flutter
+    # Purpose: Builds SmartCharts Champion application after Flutter build completes
     # Performance: Uses npm caching and build artifact caching
     # Output: Stores Node.js build artifacts for integration step
     # ---------------------------------------------------------------------------
     build_nodejs:
-        needs: security_and_setup
+        needs: [security_and_setup, build_flutter]
         if: needs.security_and_setup.outputs.is_safe == 'true'
         runs-on: ubuntu-latest
         outputs:
@@ -171,6 +171,12 @@ jobs:
                   sparse-checkout: |
                       .github/actions/nodejs-build
                   sparse-checkout-cone-mode: false
+
+            - name: Download Flutter build artifacts
+              uses: actions/download-artifact@v4
+              with:
+                  name: flutter-build
+                  path: chart_app/build/web
 
             - name: Build Node.js application
               id: nodejs_build
