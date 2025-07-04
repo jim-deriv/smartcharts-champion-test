@@ -33,7 +33,7 @@
 #   - Main: https://{owner}.github.io/smartcharts-champion
 #
 # Dependencies:
-#   - Node.js 18.x with npm caching
+#   - Node.js 18.17.0 with npm caching
 #   - Flutter 3.24.1 with stable channel
 #   - SSH key configured in repository secrets
 #   - GitHub token with appropriate permissions
@@ -55,7 +55,7 @@ concurrency:
 env:
     # Version configuration
     FLUTTER_VERSION: '3.24.1'
-    NODE_VERSION: '18.x'
+    NODE_VERSION: '18.17.0'
     FLUTTER_CHART_REF: 'master'
 
     # Build configuration

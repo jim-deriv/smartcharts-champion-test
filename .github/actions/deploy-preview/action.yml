@@ -14,7 +14,7 @@ description: "Integrates builds and deploys to GitHub Pages with verification"
 inputs:
   node_version:
     description: "Node.js version to use"
-    default: "18.x"
+    default: "18.17.0"
     required: false
   merge_commit_sha:
     description: "Merge commit SHA to checkout"
