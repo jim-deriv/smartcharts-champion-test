@@ -30,9 +30,6 @@ inputs:
   github_token:
     description: "GitHub token for repository access"
     required: true
-  merge_commit_sha:
-    description: "Merge commit SHA to checkout"
-    required: true
 
 outputs:
   build_size:
@@ -45,12 +42,6 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        ref: ${{ inputs.merge_commit_sha }}
-        fetch-depth: 0
-
     - name: Checkout flutter-chart
       uses: actions/checkout@v4
       with:

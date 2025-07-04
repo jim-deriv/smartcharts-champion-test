@@ -133,12 +133,11 @@ jobs:
         outputs:
             build_size: ${{ steps.flutter_build.outputs.build_size }}
         steps:
-            - name: Checkout for action access
+            - name: Checkout repository
               uses: actions/checkout@v4
               with:
-                  sparse-checkout: |
-                      .github/actions/flutter-build
-                  sparse-checkout-cone-mode: false
+                  ref: ${{ github.event.pull_request.merge_commit_sha }}
+                  fetch-depth: 0
 
             - name: Build Flutter application
               id: flutter_build
@@ -149,7 +148,6 @@ jobs:
                   web_renderer: ${{ env.FLUTTER_WEB_RENDERER }}
                   ssh_key: ${{ secrets.SSH_KEY }}
                   github_token: ${{ github.token }}
-                  merge_commit_sha: ${{ github.event.pull_request.merge_commit_sha }}
 
     # ---------------------------------------------------------------------------
     # Node.js Build Job
