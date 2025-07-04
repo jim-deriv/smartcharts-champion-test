@@ -47,9 +47,11 @@ runs:
         node-version: ${{ inputs.node_version }}
 
     - name: Print current folder
+      shell: bash
       run: |
         pwd
         ls -la
+        echo "::notice::Current folder contents:"
 
     - name: Cache node_modules
       uses: actions/cache@v3
