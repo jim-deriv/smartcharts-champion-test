@@ -61,15 +61,35 @@ runs:
       uses: actions/cache@v3
       with:
         path: node_modules
-        key: node-modules-${{ hashFiles('package-lock.json') }}
-        restore-keys: node-modules-
+        key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+        restore-keys: |
+          node-modules-${{ runner.os }}-
+          node-modules-
 
     - name: Install dependencies with retry
       uses: nick-fields/retry@v3
       with:
         timeout_minutes: 10
         max_attempts: 3
-        command: npm ci
+        command: |
+          echo "::group::NPM and Node.js version information"
+          node --version
+          npm --version
+          echo "::endgroup::"
+          
+          echo "::group::Package-lock.json information"
+          if [ -f "package-lock.json" ]; then
+            echo "package-lock.json exists"
+            head -10 package-lock.json
+          else
+            echo "package-lock.json not found"
+            exit 1
+          fi
+          echo "::endgroup::"
+          
+          echo "::group::Running npm ci"
+          npm ci --verbose
+          echo "::endgroup::"
 
     - name: Build SmartCharts Champion with retry
       uses: nick-fields/retry@v3
