@@ -1,0 +1,258 @@
+# =============================================================================
+# Deploy Preview Action
+# =============================================================================
+#
+# Purpose: Integrates builds and deploys to GitHub Pages with verification
+# Dependencies: Requires both Flutter and Node.js build artifacts
+# Features: Deployment verification, failure reporting, and cleanup
+#
+# =============================================================================
+
+name: "Deploy Preview"
+description: "Integrates builds and deploys to GitHub Pages with verification"
+
+inputs:
+  node_version:
+    description: "Node.js version to use"
+    default: "18.x"
+    required: false
+  merge_commit_sha:
+    description: "Merge commit SHA to checkout"
+    required: true
+  branch_name:
+    description: "Deployment branch name"
+    required: true
+  deploy_url:
+    description: "Deployment URL"
+    required: true
+  is_preview:
+    description: "Whether this is a preview deployment"
+    required: true
+  github_token:
+    description: "GitHub token for deployment"
+    required: true
+  deployment_verification_attempts:
+    description: "Number of deployment verification attempts"
+    default: "10"
+    required: false
+  deployment_wait_time:
+    description: "Time to wait before verification (seconds)"
+    default: "60"
+    required: false
+
+outputs:
+  deployment_verified:
+    description: "Whether deployment was verified successfully"
+    value: ${{ steps.verify_deployment.outputs.deployment_verified }}
+  total_size:
+    description: "Total deployment size"
+    value: ${{ steps.build_stats.outputs.total_size }}
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs.merge_commit_sha }}
+        fetch-depth: 0
+
+    - name: Setup Node.js for deployment
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node_version }}
+        cache: "npm"
+
+    - name: Install deployment dependencies
+      shell: bash
+      run: npm ci
+
+    - name: Debug current directory
+      shell: bash
+      run: |
+        echo "::group::Debug Information"
+        echo "Current working directory: $(pwd)"
+        echo "Directory contents:"
+        ls -la
+        echo "Package files:"
+        ls -la package* || echo "No package files found"
+        echo "::endgroup::"
+
+    - name: Download Flutter build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: flutter-build
+        path: flutter-build
+
+    - name: Download Node.js build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: nodejs-build
+        path: dist
+
+    - name: Verify build artifacts
+      shell: bash
+      run: |
+        set -e
+        echo "::group::Verifying build artifacts integrity"
+
+        # Verify Flutter build artifacts
+        if [ ! -d "flutter-build" ]; then
+          echo "::error::Flutter build artifacts directory not found"
+          exit 1
+        fi
+
+        if [ ! -f "flutter-build/index.html" ]; then
+          echo "::error::Flutter build missing index.html"
+          exit 1
+        fi
+
+        # Verify Node.js build artifacts
+        if [ ! -d "dist" ]; then
+          echo "::error::Node.js build artifacts directory not found"
+          exit 1
+        fi
+
+        # Check for essential files in dist
+        ESSENTIAL_FILES=("index.html")
+        for file in "${ESSENTIAL_FILES[@]}"; do
+          if [ ! -f "dist/$file" ]; then
+            echo "::error::Essential file missing from Node.js build: $file"
+            exit 1
+          fi
+        done
+
+        # Verify artifacts are not empty
+        FLUTTER_FILE_COUNT=$(find flutter-build -type f | wc -l)
+        NODEJS_FILE_COUNT=$(find dist -type f | wc -l)
+
+        if [ "$FLUTTER_FILE_COUNT" -eq 0 ]; then
+          echo "::error::Flutter build artifacts directory is empty"
+          exit 1
+        fi
+
+        if [ "$NODEJS_FILE_COUNT" -eq 0 ]; then
+          echo "::error::Node.js build artifacts directory is empty"
+          exit 1
+        fi
+
+        echo "::notice::✅ Build artifacts verification passed"
+        echo "::notice::  - Flutter files: $FLUTTER_FILE_COUNT"
+        echo "::notice::  - Node.js files: $NODEJS_FILE_COUNT"
+        echo "::endgroup::"
+
+    - name: Integrate Flutter build
+      shell: bash
+      run: |
+        set -e
+        echo "::group::Integrating Flutter build with main application"
+
+        # Create Flutter subdirectory in main dist folder
+        mkdir -p dist/flutter
+
+        # Copy all Flutter web build artifacts
+        cp -r flutter-build/* dist/flutter/
+
+        # Verify integration was successful
+        if [ ! -f "dist/flutter/index.html" ]; then
+          echo "::error::Failed to integrate Flutter build artifacts"
+          exit 1
+        fi
+
+        echo "::notice::Successfully integrated Flutter build"
+        echo "::endgroup::"
+
+    - name: Configure Git
+      shell: bash
+      run: |
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+    - name: Report final build statistics
+      id: build_stats
+      shell: bash
+      run: |
+        TOTAL_SIZE=$(du -sh dist | cut -f1)
+        echo "::notice::Final deployment size: $TOTAL_SIZE"
+        echo "total_size=$TOTAL_SIZE" >> $GITHUB_OUTPUT
+
+        # Count files for additional stats
+        FILE_COUNT=$(find dist -type f | wc -l)
+        echo "::notice::Total files in deployment: $FILE_COUNT"
+
+    - name: Deploy to GitHub Pages with retry
+      uses: nick-fields/retry@v3
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        BRANCH_NAME: ${{ inputs.branch_name }}
+        IS_PREVIEW: ${{ inputs.is_preview }}
+        DEPLOY_URL: ${{ inputs.deploy_url }}
+      with:
+        timeout_minutes: 10
+        max_attempts: 3
+        shell: bash
+        command: |
+          set -e
+          echo "::group::Deploying to GitHub Pages"
+          echo "::notice::Deploying to branch: $BRANCH_NAME"
+
+          if [ "$IS_PREVIEW" == "true" ]; then
+            echo "::notice::Running preview deployment to folder: $BRANCH_NAME"
+            npm run gh-pages:folder -- "$BRANCH_NAME"
+          else
+            echo "::notice::Running main deployment"
+            npm run gh-pages
+          fi
+
+          echo "::notice::Deployment completed successfully"
+          echo "::notice::Site will be available at: $DEPLOY_URL"
+          echo "::endgroup::"
+
+    - name: Wait for deployment propagation
+      if: inputs.is_preview == 'true'
+      shell: bash
+      run: |
+        echo "::notice::Waiting for GitHub Pages deployment to propagate..."
+        sleep ${{ inputs.deployment_wait_time }}
+
+    - name: Verify deployment
+      id: verify_deployment
+      shell: bash
+      run: |
+        DEPLOY_URL="${{ inputs.deploy_url }}"
+        MAX_ATTEMPTS=${{ inputs.deployment_verification_attempts }}
+        ATTEMPT=1
+
+        echo "::group::Verifying deployment at $DEPLOY_URL"
+
+        while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
+          echo "::notice::Verification attempt $ATTEMPT of $MAX_ATTEMPTS"
+
+          if curl -s -f --max-time 30 "$DEPLOY_URL" > /dev/null; then
+            echo "::notice::✅ Deployment verified successfully!"
+            echo "deployment_verified=true" >> $GITHUB_OUTPUT
+            break
+          fi
+
+          if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
+            echo "::warning::⚠️  Deployment verification failed after $MAX_ATTEMPTS attempts"
+            echo "::warning::The site may still be propagating. Please check manually: $DEPLOY_URL"
+            echo "deployment_verified=false" >> $GITHUB_OUTPUT
+            break
+          fi
+
+          echo "::notice::Attempt $ATTEMPT failed, retrying in 10 seconds..."
+          sleep 10
+          ATTEMPT=$((ATTEMPT + 1))
+        done
+
+        echo "::endgroup::"
+
+    - name: Cleanup build artifacts
+      if: always()
+      shell: bash
+      run: |
+        # Clean up large temporary files and caches
+        rm -rf node_modules/.cache
+        rm -rf dist
+        rm -rf flutter-build

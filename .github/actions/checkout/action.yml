@@ -1,5 +1,5 @@
 # =============================================================================
-# Smart Checkout Action
+# SmartCharts Checkout Action
 # =============================================================================
 #
 # Purpose: Provides intelligent repository checkout with fallback support
@@ -23,7 +23,7 @@
 #
 # =============================================================================
 
-name: "Smart Checkout"
+name: "SmartCharts Checkout"
 description: "Checkout with fallback to alternate repository/ref if primary ref does not exist"
 
 inputs:
@@ -66,20 +66,11 @@ outputs:
 runs:
   using: composite
   steps:
-    # -----------------------------------------------------------------------
-    # Step 1: Input Validation
-    # -----------------------------------------------------------------------
-    # Purpose: Validates input combinations and formats to prevent invalid configurations
-    # Logic: Ensures alternate_repository is provided when alternate_ref is specified
-    # Safety: Prevents runtime errors from invalid input combinations
-    # Format: Validates repository name format and other critical inputs
-    # -----------------------------------------------------------------------
     - name: Validate inputs
       id: validate
       shell: bash
       run: |
         # Validate that alternate_repository is provided when alternate_ref is specified
-        # This prevents scenarios where we have a fallback ref but no fallback repository
         if [[ -n "${{ inputs.ref }}" && -n "${{ inputs.alternate_ref }}" && -z "${{ inputs.alternate_repository }}" ]]; then
           echo "::error::alternate_repository is required when alternate_ref is specified"
           exit 1
@@ -111,15 +102,6 @@ runs:
 
         echo "::notice::Input validation completed successfully"
 
-    # -----------------------------------------------------------------------
-    # Step 2: Reference Existence Check
-    # -----------------------------------------------------------------------
-    # Purpose: Determines if the primary ref exists in the primary repository
-    # Method: Uses git ls-remote with authentication and timeout to check ref availability
-    # Scope: Checks both branches and tags for comprehensive coverage
-    # Output: Sets ref-exists flag (true/false/default) for conditional logic
-    # Timeout: Implements timeout to prevent hanging on network issues
-    # -----------------------------------------------------------------------
     - name: Check if ref exists
       id: repo
       shell: bash
@@ -139,8 +121,7 @@ runs:
 
         echo "::notice::Checking if ref '$REF' exists in repository '$REPOSITORY'"
 
-        # Check if the specified ref exists in the primary repository
-        # Uses authenticated git ls-remote with timeout to check both heads and tags
+        # Check if the specified ref exists using git ls-remote with timeout
         if timeout 30 git ls-remote --exit-code https://$GH_TOKEN@github.com/$REPOSITORY.git "$REF" >/dev/null 2>&1; then
           echo "::notice::✅ Found ref '$REF' in $REPOSITORY"
           echo "ref-exists=true" >> $GITHUB_OUTPUT
@@ -166,13 +147,6 @@ runs:
           fi
         fi
 
-    # -----------------------------------------------------------------------
-    # Step 3: Primary Repository Checkout
-    # -----------------------------------------------------------------------
-    # Purpose: Checks out the primary repository when ref exists or is default
-    # Conditions: Runs when ref exists (true) or no ref specified (default)
-    # Configuration: Uses all provided inputs for maximum flexibility
-    # -----------------------------------------------------------------------
     - name: Checkout primary repository
       if: steps.repo.outputs.ref-exists == 'true' || steps.repo.outputs.ref-exists == 'default'
       uses: actions/checkout@v4
@@ -183,13 +157,6 @@ runs:
         ref: ${{ inputs.ref }}
         token: ${{ inputs.token }}
 
-    # -----------------------------------------------------------------------
-    # Step 4: Alternate Repository Checkout
-    # -----------------------------------------------------------------------
-    # Purpose: Checks out the alternate repository when primary ref doesn't exist
-    # Conditions: Only runs when primary ref check failed (ref-exists == false)
-    # Fallback Logic: Uses alternate_ref if provided, otherwise uses primary ref
-    # -----------------------------------------------------------------------
     - name: Checkout alternate repository
       if: steps.repo.outputs.ref-exists == 'false'
       uses: actions/checkout@v4
@@ -200,14 +167,6 @@ runs:
         ref: ${{ inputs.alternate_ref || inputs.ref }}
         token: ${{ inputs.token }}
 
-    # -----------------------------------------------------------------------
-    # Step 5: Output Generation
-    # -----------------------------------------------------------------------
-    # Purpose: Sets action outputs to inform caller which repository/ref was used
-    # Logic: Provides different outputs based on which checkout path was taken
-    # Transparency: Allows workflows to know exactly what was checked out
-    # Summary: Provides comprehensive checkout summary for debugging
-    # -----------------------------------------------------------------------
     - name: Set final outputs
       id: set-output
       shell: bash
