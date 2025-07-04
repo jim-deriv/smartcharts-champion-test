@@ -20,9 +20,6 @@ inputs:
     description: "Node environment"
     default: "production"
     required: false
-  merge_commit_sha:
-    description: "Merge commit SHA to checkout"
-    required: true
 
 outputs:
   build_size:
@@ -35,12 +32,6 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        ref: ${{ inputs.merge_commit_sha }}
-        fetch-depth: 1
-
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
@@ -189,17 +180,20 @@ runs:
           
           echo "Attempting build with different methods..."
           
-          # Method 1: Try npm run build (ignore husky errors)
+          # Method 1: Try npm run build
           echo "Method 1: npm run build"
-          if npm run build --ignore-scripts; then
-            echo "npm run build with --ignore-scripts succeeded"
-            BUILD_SUCCESS=true
-          elif npm run build; then
+          if npm run build; then
             echo "npm run build succeeded"
             BUILD_SUCCESS=true
           else
-            echo "npm run build failed"
-            BUILD_SUCCESS=false
+            echo "npm run build failed, trying with --ignore-scripts"
+            if npm run build --ignore-scripts; then
+              echo "npm run build with --ignore-scripts succeeded"
+              BUILD_SUCCESS=true
+            else
+              echo "npm run build failed with all methods"
+              BUILD_SUCCESS=false
+            fi
           fi
           
           echo "::endgroup::"
