@@ -46,6 +46,11 @@ runs:
       with:
         node-version: ${{ inputs.node_version }}
 
+    - name: Print current folder
+      run: |
+        pwd
+        ls -la
+
     - name: Cache node_modules
       uses: actions/cache@v3
       with:
