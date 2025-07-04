@@ -61,20 +61,31 @@ runs:
       uses: actions/setup-node@v4
       with:
         node-version: ${{ inputs.node_version }}
-        cache: 'npm'
+        cache: "npm"
 
     - name: Install deployment dependencies
       shell: bash
       run: npm ci
 
+    - name: Debug current directory
+      shell: bash
+      run: |
+        echo "::group::Debug Information"
+        echo "Current working directory: $(pwd)"
+        echo "Directory contents:"
+        ls -la
+        echo "Package files:"
+        ls -la package* || echo "No package files found"
+        echo "::endgroup::"
+
     - name: Download Flutter build artifacts
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: flutter-build
         path: flutter-build
 
     - name: Download Node.js build artifacts
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: nodejs-build
         path: dist
@@ -170,7 +181,7 @@ runs:
         echo "::notice::Total files in deployment: $FILE_COUNT"
 
     - name: Deploy to GitHub Pages with retry
-      uses: nick-fields/retry@v2
+      uses: nick-fields/retry@v3
       env:
         GH_TOKEN: ${{ inputs.github_token }}
         BRANCH_NAME: ${{ inputs.branch_name }}
@@ -179,6 +190,7 @@ runs:
       with:
         timeout_minutes: 10
         max_attempts: 3
+        shell: bash
         command: |
           set -e
           echo "::group::Deploying to GitHub Pages"

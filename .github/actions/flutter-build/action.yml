@@ -54,7 +54,7 @@ runs:
     - name: Checkout flutter-chart
       uses: actions/checkout@v4
       with:
-        repository: 'deriv-com/flutter-chart'
+        repository: "deriv-com/flutter-chart"
         path: flutter-chart
         ref: ${{ inputs.flutter_chart_ref }}
         token: ${{ inputs.github_token }}
@@ -63,8 +63,21 @@ runs:
       uses: subosito/flutter-action@v2
       with:
         flutter-version: ${{ inputs.flutter_version }}
-        channel: 'stable'
+        channel: "stable"
         cache: true
+
+    - name: Debug current directory
+      shell: bash
+      run: |
+        echo "::group::Debug Information"
+        echo "Current working directory: $(pwd)"
+        echo "Directory contents:"
+        ls -la
+        echo "Flutter chart directory:"
+        ls -la flutter-chart/ || echo "Flutter chart directory not found"
+        echo "Chart app directory:"
+        ls -la chart_app/ || echo "Chart app directory not found"
+        echo "::endgroup::"
 
     - name: Cache Flutter dependencies
       uses: actions/cache@v3
@@ -93,12 +106,13 @@ runs:
         ssh-keyscan github.com >> ~/.ssh/known_hosts
 
     - name: Build Flutter application with retry
-      uses: nick-fields/retry@v2
+      uses: nick-fields/retry@v3
       env:
-        GIT_SSH_COMMAND: 'ssh -i ~/.ssh/github_action_key -o StrictHostKeyChecking=no'
+        GIT_SSH_COMMAND: "ssh -i ~/.ssh/github_action_key -o StrictHostKeyChecking=no"
       with:
         timeout_minutes: 10
         max_attempts: 3
+        shell: bash
         command: |
           set -e
           cd chart_app
@@ -126,7 +140,7 @@ runs:
         echo "build_size=$FLUTTER_SIZE" >> $GITHUB_OUTPUT
 
     - name: Upload Flutter build artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: flutter-build
         path: chart_app/build/web

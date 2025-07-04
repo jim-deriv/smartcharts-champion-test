@@ -93,7 +93,7 @@ class AddOnsRepository<T extends AddOnConfig> extends ChangeNotifier
       try {
         final T addOnConfig = createAddOn.call(jsonDecode(encodedAddOn));
         items.add(addOnConfig);
-      } on Exception catch (e) {
+      } on Exception {
         continue;
       }
     }
