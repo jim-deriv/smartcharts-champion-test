@@ -46,12 +46,16 @@ runs:
       with:
         node-version: ${{ inputs.node_version }}
 
-    - name: Print current folder
+    - name: Debug current directory
       shell: bash
       run: |
-        pwd
+        echo "::group::Debug Information"
+        echo "Current working directory: $(pwd)"
+        echo "Directory contents:"
         ls -la
-        echo "::notice::Current folder contents:"
+        echo "Package files:"
+        ls -la package* || echo "No package files found"
+        echo "::endgroup::"
 
     - name: Cache node_modules
       uses: actions/cache@v3
@@ -61,14 +65,14 @@ runs:
         restore-keys: node-modules-
 
     - name: Install dependencies with retry
-      uses: nick-fields/retry@v2
+      uses: nick-fields/retry@v3
       with:
         timeout_minutes: 10
         max_attempts: 3
         command: npm ci
 
     - name: Build SmartCharts Champion with retry
-      uses: nick-fields/retry@v2
+      uses: nick-fields/retry@v3
       env:
         NODE_ENV: ${{ inputs.node_env }}
       with:
