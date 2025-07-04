@@ -139,9 +139,12 @@ runs:
           
           echo "Attempting build with different methods..."
           
-          # Method 1: Try npm run build
+          # Method 1: Try npm run build (ignore husky errors)
           echo "Method 1: npm run build"
-          npm run build && echo "npm run build succeeded" || echo "npm run build failed"
+          npm run build --ignore-scripts && echo "npm run build succeeded" || {
+            echo "npm run build with --ignore-scripts failed, trying without flag"
+            npm run build && echo "npm run build succeeded" || echo "npm run build failed"
+          }
           
           echo "::endgroup::"
 
