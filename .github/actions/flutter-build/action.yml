@@ -1,13 +1,3 @@
-# =============================================================================
-# Flutter Build Action
-# =============================================================================
-#
-# Purpose: Builds Flutter web application with caching and retry logic
-# Performance: Uses extensive caching for dependencies and build artifacts
-# Output: Stores Flutter build artifacts for integration step
-#
-# =============================================================================
-
 name: "Flutter Build"
 description: "Builds Flutter web application with caching and retry mechanisms"
 
@@ -53,6 +43,12 @@ runs:
         flutter-version: ${{ inputs.flutter_version }}
         channel: "stable"
         cache: true
+
+    - name: Configure Git for token authentication
+      shell: bash
+      run: |
+        git config --global url."https://x-access-token:${{ inputs.github_token }}@github.com/".insteadOf "git@github.com:"
+        git config --global url."https://x-access-token:${{ inputs.github_token }}@github.com/".insteadOf "ssh://git@github.com/"
 
     - name: Debug current directory
       shell: bash
