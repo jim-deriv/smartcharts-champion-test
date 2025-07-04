@@ -60,13 +60,25 @@ runs:
           node-modules-${{ runner.os }}-
           node-modules-
 
-    - name: Install dependencies with retry
-      uses: nick-fields/retry@v3
-      with:
-        timeout_minutes: 10
-        max_attempts: 3
-        shell: bash
-        command: |
+    - name: Install dependencies with manual retry
+      shell: bash
+      run: |
+        set -e
+        
+        # Manual retry logic for npm install
+        MAX_ATTEMPTS=3
+        ATTEMPT=1
+        
+        while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
+          echo "::notice::Install attempt $ATTEMPT of $MAX_ATTEMPTS"
+          
+          if [ $ATTEMPT -gt 1 ]; then
+            echo "::notice::Waiting 30 seconds before retry..."
+            sleep 30
+          fi
+          
+          echo "::group::Installing dependencies (Attempt $ATTEMPT)"
+          
           echo "::group::NPM and Node.js version information"
           node --version
           npm --version
@@ -83,53 +95,77 @@ runs:
           echo "::endgroup::"
           
           echo "::group::Running npm ci"
-          npm ci --verbose
-          echo "::endgroup::"
+          if npm ci --verbose; then
+            echo "::notice::✅ Dependencies installed successfully on attempt $ATTEMPT"
+            echo "::endgroup::"
+            break
+          else
+            echo "::endgroup::"
+            if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
+              echo "::error::❌ Failed to install dependencies after $MAX_ATTEMPTS attempts"
+              exit 1
+            else
+              echo "::warning::⚠️ Install attempt $ATTEMPT failed, will retry..."
+              ATTEMPT=$((ATTEMPT + 1))
+            fi
+          fi
+        done
 
-    - name: Build SmartCharts Champion with retry
-      uses: nick-fields/retry@v3
+    - name: Build SmartCharts Champion with manual retry
+      shell: bash
       env:
         NODE_ENV: ${{ inputs.node_env }}
         PATH: ${{ github.workspace }}/node_modules/.bin:${{ env.PATH }}
-      with:
-        timeout_minutes: 15
-        max_attempts: 3
-        shell: bash
-        command: |
-          set -e
-          echo "::group::Building SmartCharts Champion"
+      run: |
+        set -e
+        
+        # Manual retry logic
+        MAX_ATTEMPTS=3
+        ATTEMPT=1
+        
+        while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
+          echo "::notice::Build attempt $ATTEMPT of $MAX_ATTEMPTS"
           
-          # Detailed environment debugging
-          echo "=== Environment Debug ==="
-          echo "Current directory: $(pwd)"
-          echo "GITHUB_WORKSPACE: $GITHUB_WORKSPACE"
-          echo "PATH: $PATH"
-          echo "NODE_ENV: $NODE_ENV"
-          
-          echo "=== Directory Contents ==="
-          echo "Current directory contents:"
-          ls -la
-          
-          echo "=== Node Modules Check ==="
-          if [ -d "node_modules" ]; then
-            echo "node_modules directory exists"
-            echo "node_modules/.bin contents:"
-            ls -la node_modules/.bin/ | head -20
-            echo "Looking for rimraf specifically:"
-            find node_modules -name "rimraf*" -type f 2>/dev/null || echo "No rimraf files found"
-          else
-            echo "ERROR: node_modules directory does not exist!"
-            exit 1
+          if [ $ATTEMPT -gt 1 ]; then
+            echo "::notice::Waiting 30 seconds before retry..."
+            sleep 30
           fi
           
-          echo "=== Package.json Check ==="
-          if [ -f "package.json" ]; then
-            echo "package.json exists"
-            echo "Build script from package.json:"
-            grep -A1 -B1 '"build"' package.json || echo "No build script found"
-          else
-            echo "ERROR: package.json not found!"
-            exit 1
+          echo "::group::Building SmartCharts Champion (Attempt $ATTEMPT)"
+          
+          # Detailed environment debugging (only on first attempt)
+          if [ $ATTEMPT -eq 1 ]; then
+            echo "=== Environment Debug ==="
+            echo "Current directory: $(pwd)"
+            echo "GITHUB_WORKSPACE: $GITHUB_WORKSPACE"
+            echo "PATH: $PATH"
+            echo "NODE_ENV: $NODE_ENV"
+            
+            echo "=== Directory Contents ==="
+            echo "Current directory contents:"
+            ls -la
+            
+            echo "=== Node Modules Check ==="
+            if [ -d "node_modules" ]; then
+              echo "node_modules directory exists"
+              echo "node_modules/.bin contents:"
+              ls -la node_modules/.bin/ | head -20
+              echo "Looking for rimraf specifically:"
+              find node_modules -name "rimraf*" -type f 2>/dev/null || echo "No rimraf files found"
+            else
+              echo "ERROR: node_modules directory does not exist!"
+              exit 1
+            fi
+            
+            echo "=== Package.json Check ==="
+            if [ -f "package.json" ]; then
+              echo "package.json exists"
+              echo "Build script from package.json:"
+              grep -A1 -B1 '"build"' package.json || echo "No build script found"
+            else
+              echo "ERROR: package.json not found!"
+              exit 1
+            fi
           fi
           
           # Try different approaches to run the build
@@ -141,18 +177,32 @@ runs:
           
           # Method 1: Try npm run build (ignore husky errors)
           echo "Method 1: npm run build"
-          npm run build --ignore-scripts && echo "npm run build succeeded" || {
-            echo "npm run build with --ignore-scripts failed, trying without flag"
-            npm run build && echo "npm run build succeeded" || echo "npm run build failed"
-          }
+          if npm run build --ignore-scripts; then
+            echo "npm run build with --ignore-scripts succeeded"
+            BUILD_SUCCESS=true
+          elif npm run build; then
+            echo "npm run build succeeded"
+            BUILD_SUCCESS=true
+          else
+            echo "npm run build failed"
+            BUILD_SUCCESS=false
+          fi
           
           echo "::endgroup::"
 
-          # Verify build output exists
-          if [ ! -d "dist" ]; then
+          # Check if build succeeded
+          if [ "$BUILD_SUCCESS" = true ] && [ -d "dist" ]; then
+            echo "::notice::✅ Build completed successfully on attempt $ATTEMPT"
+            break
+          elif [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
+            echo "::error::❌ Build failed after $MAX_ATTEMPTS attempts"
             echo "::error::SmartCharts Champion build failed - no dist directory found"
             exit 1
+          else
+            echo "::warning::⚠️ Build attempt $ATTEMPT failed, will retry..."
+            ATTEMPT=$((ATTEMPT + 1))
           fi
+        done
 
     - name: Report Node.js build size
       id: build_stats
