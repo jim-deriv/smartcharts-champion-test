@@ -121,6 +121,7 @@ runs:
       env:
         NODE_ENV: ${{ inputs.node_env }}
         PATH: ${{ github.workspace }}/node_modules/.bin:${{ env.PATH }}
+        HUSKY: 0
       run: |
         set -e
         
@@ -180,17 +181,21 @@ runs:
           
           echo "Attempting build with different methods..."
           
-          # Method 1: Try npm run build (ignore husky errors)
-          echo "Method 1: npm run build"
-          if npm run build --ignore-scripts; then
-            echo "npm run build with --ignore-scripts succeeded"
-            BUILD_SUCCESS=true
-          elif npm run build; then
+          # Method 1: Try npm run build (disable husky in CI)
+          echo "Method 1: npm run build with CI environment"
+          export HUSKY=0  # Disable husky in CI environment
+          if npm run build; then
             echo "npm run build succeeded"
             BUILD_SUCCESS=true
           else
-            echo "npm run build failed"
-            BUILD_SUCCESS=false
+            echo "npm run build failed, trying with --ignore-scripts"
+            if npm run build --ignore-scripts; then
+              echo "npm run build with --ignore-scripts succeeded"
+              BUILD_SUCCESS=true
+            else
+              echo "npm run build failed with all methods"
+              BUILD_SUCCESS=false
+            fi
           fi
           
           echo "::endgroup::"
