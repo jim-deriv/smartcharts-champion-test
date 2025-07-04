@@ -165,12 +165,11 @@ jobs:
         outputs:
             build_size: ${{ steps.nodejs_build.outputs.build_size }}
         steps:
-            - name: Checkout for action access
+            - name: Checkout repository
               uses: actions/checkout@v4
               with:
-                  sparse-checkout: |
-                      .github/actions/nodejs-build
-                  sparse-checkout-cone-mode: false
+                  ref: ${{ github.event.pull_request.merge_commit_sha }}
+                  fetch-depth: 0
 
             - name: Build Node.js application
               id: nodejs_build

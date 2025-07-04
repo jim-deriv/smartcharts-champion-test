@@ -35,12 +35,6 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        ref: ${{ inputs.merge_commit_sha }}
-        fetch-depth: 0
-
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
